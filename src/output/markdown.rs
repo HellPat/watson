@@ -73,7 +73,10 @@ fn render_blastradius<W: Write>(w: &mut W, result: &Value) -> Result<()> {
     } else {
         writeln!(w, "### Affected entry points ({})", affected.len())?;
         writeln!(w)?;
-        for ep in &affected {
+        for grouped in group_by_kind(&affected) {
+            writeln!(w, "#### {} ({})", grouped.kind, grouped.entries.len())?;
+            writeln!(w)?;
+            for ep in &grouped.entries {
             let kind = ep["kind"].as_str().unwrap_or("?");
             let name = ep["name"].as_str().unwrap_or("?");
             let handler_fqn = ep["handler"]["fqn"].as_str().unwrap_or("?");
@@ -81,7 +84,7 @@ fn render_blastradius<W: Write>(w: &mut W, result: &Value) -> Result<()> {
             let handler_line = ep["handler"]["line"].as_u64().unwrap_or(0);
             let confidence = ep["min_confidence"].as_str().unwrap_or("Confirmed");
 
-            writeln!(w, "#### `{}` — {}", kind, name)?;
+            writeln!(w, "##### {}", name)?;
             writeln!(w)?;
             writeln!(w, "- **Handler**: `{}` (`{}:{}`)", handler_fqn, handler_path, handler_line)?;
             writeln!(w, "- **Confidence**: {}", confidence)?;
@@ -127,6 +130,7 @@ fn render_blastradius<W: Write>(w: &mut W, result: &Value) -> Result<()> {
                 writeln!(w, "```")?;
             }
             writeln!(w)?;
+            }
         }
     }
 
@@ -147,10 +151,78 @@ fn render_blastradius<W: Write>(w: &mut W, result: &Value) -> Result<()> {
             } else {
                 writeln!(w, "- `{}` — `{}:{}-{}`", fqn, path, ls, le)?;
             }
+            if let Some(affects) = c["affects"].as_array() {
+                if !affects.is_empty() {
+                    let parts: Vec<String> = affects
+                        .iter()
+                        .map(|a| {
+                            format!(
+                                "`{} {}`",
+                                a["kind"].as_str().unwrap_or("?"),
+                                a["name"].as_str().unwrap_or("?")
+                            )
+                        })
+                        .collect();
+                    writeln!(w, "  - affects: {}", parts.join(", "))?;
+                }
+            }
         }
     }
 
     Ok(())
+}
+
+struct GroupedAffected<'a> {
+    kind: &'a str,
+    entries: Vec<&'a Value>,
+}
+
+/// Group `affected_entry_points` by `kind` and return groups in a stable
+/// order: known framework kinds first (route, command, message_handler,
+/// event_listener, cron/periodic/schedule_provider), then anything else
+/// alphabetical. Within a group, entries are sorted by `name`.
+fn group_by_kind(affected: &[Value]) -> Vec<GroupedAffected<'_>> {
+    let order = [
+        "symfony.route",
+        "symfony.command",
+        "symfony.message_handler",
+        "symfony.event_listener",
+        "symfony.cron_task",
+        "symfony.periodic_task",
+        "symfony.schedule_provider",
+        "laravel.route",
+        "laravel.command",
+        "laravel.job",
+        "laravel.listener",
+        "laravel.scheduled_task",
+    ];
+
+    let mut buckets: std::collections::BTreeMap<String, Vec<&Value>> = std::collections::BTreeMap::new();
+    for ep in affected {
+        let kind = ep["kind"].as_str().unwrap_or("?").to_string();
+        buckets.entry(kind).or_default().push(ep);
+    }
+    for entries in buckets.values_mut() {
+        entries.sort_by_key(|e| e["name"].as_str().unwrap_or("").to_string());
+    }
+
+    let mut out: Vec<GroupedAffected> = Vec::new();
+    for kind in order {
+        if let Some(entries) = buckets.remove(kind) {
+            out.push(GroupedAffected { kind, entries });
+        }
+    }
+    // Anything else, alphabetical.
+    let mut leftover: Vec<(String, Vec<&Value>)> = buckets.into_iter().collect();
+    leftover.sort_by(|a, b| a.0.cmp(&b.0));
+    for (kind, entries) in leftover {
+        // Leak the kind string with Box::leak to satisfy 'a — but instead use
+        // a different shape: keep ownership via a Vec<String> alongside.
+        // Simpler: store kind as &str via a stable Box.
+        let leaked: &'static str = Box::leak(kind.into_boxed_str());
+        out.push(GroupedAffected { kind: leaked, entries });
+    }
+    out
 }
 
 fn render_list_entrypoints<W: Write>(w: &mut W, result: &Value) -> Result<()> {

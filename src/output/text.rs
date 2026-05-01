@@ -65,16 +65,27 @@ fn render_blastradius<W: Write>(w: &mut W, result: &Value) -> Result<()> {
     if affected.is_empty() {
         writeln!(w, "  no entry points affected")?;
     } else {
-        writeln!(w, "  affected entry points:")?;
+        let mut by_kind: std::collections::BTreeMap<String, Vec<&Value>> = std::collections::BTreeMap::new();
         for ep in &affected {
-            let kind = ep["kind"].as_str().unwrap_or("?");
-            let name = ep["name"].as_str().unwrap_or("?");
-            let handler = ep["handler"]["fqn"].as_str().unwrap_or("?");
-            let path = ep["handler"]["path"].as_str().unwrap_or("?");
-            let line = ep["handler"]["line"].as_u64().unwrap_or(0);
-            let conf = ep["min_confidence"].as_str().unwrap_or("Confirmed");
-            writeln!(w, "    - {} {} [{}]", kind, name, conf)?;
-            writeln!(w, "        handler: {} ({}:{})", handler, path, line)?;
+            by_kind.entry(ep["kind"].as_str().unwrap_or("?").to_string()).or_default().push(ep);
+        }
+        let order = [
+            "symfony.route", "symfony.command", "symfony.message_handler",
+            "symfony.event_listener", "symfony.cron_task", "symfony.periodic_task",
+            "symfony.schedule_provider",
+            "laravel.route", "laravel.command", "laravel.job", "laravel.listener",
+            "laravel.scheduled_task",
+        ];
+        let emit_kind = |w: &mut W, kind: &str, eps: &[&Value]| -> Result<()> {
+            writeln!(w, "  {} ({}):", kind, eps.len())?;
+            for ep in eps {
+                let name = ep["name"].as_str().unwrap_or("?");
+                let handler = ep["handler"]["fqn"].as_str().unwrap_or("?");
+                let path = ep["handler"]["path"].as_str().unwrap_or("?");
+                let line = ep["handler"]["line"].as_u64().unwrap_or(0);
+                let conf = ep["min_confidence"].as_str().unwrap_or("Confirmed");
+                writeln!(w, "    - {} [{}]", name, conf)?;
+                writeln!(w, "        handler: {} ({}:{})", handler, path, line)?;
             if let Some(extra) = ep.get("extra") {
                 if let Some(p) = extra.get("path").and_then(|v| v.as_str()) {
                     let methods: String = extra
@@ -95,13 +106,25 @@ fn render_blastradius<W: Write>(w: &mut W, result: &Value) -> Result<()> {
                     writeln!(w, "        every: {}", freq)?;
                 }
             }
-            let witness = ep["witness_path"].as_array().cloned().unwrap_or_default();
-            for step in &witness {
-                let from = step["from"].as_str().unwrap_or("?");
-                let to = step["to"].as_str().unwrap_or("?");
-                let conf = step["confidence"].as_str().unwrap_or("?");
-                writeln!(w, "        via {} -> {} [{}]", from, to, conf)?;
+                let witness = ep["witness_path"].as_array().cloned().unwrap_or_default();
+                for step in &witness {
+                    let from = step["from"].as_str().unwrap_or("?");
+                    let to = step["to"].as_str().unwrap_or("?");
+                    let conf = step["confidence"].as_str().unwrap_or("?");
+                    writeln!(w, "        via {} -> {} [{}]", from, to, conf)?;
+                }
             }
+            Ok(())
+        };
+        for kind in order {
+            if let Some(eps) = by_kind.remove(kind) {
+                emit_kind(w, kind, &eps)?;
+            }
+        }
+        let mut leftover: Vec<(String, Vec<&Value>)> = by_kind.into_iter().collect();
+        leftover.sort_by(|a, b| a.0.cmp(&b.0));
+        for (kind, eps) in leftover {
+            emit_kind(w, &kind, &eps)?;
         }
     }
     writeln!(w)?;
@@ -120,6 +143,21 @@ fn render_blastradius<W: Write>(w: &mut W, result: &Value) -> Result<()> {
                 writeln!(w, "    - {} ({}:{})", fqn, path, ls)?;
             } else {
                 writeln!(w, "    - {} ({}:{}-{})", fqn, path, ls, le)?;
+            }
+            if let Some(affects) = c["affects"].as_array() {
+                if !affects.is_empty() {
+                    let parts: Vec<String> = affects
+                        .iter()
+                        .map(|a| {
+                            format!(
+                                "{} {}",
+                                a["kind"].as_str().unwrap_or("?"),
+                                a["name"].as_str().unwrap_or("?")
+                            )
+                        })
+                        .collect();
+                    writeln!(w, "        affects: {}", parts.join(", "))?;
+                }
             }
         }
     }
