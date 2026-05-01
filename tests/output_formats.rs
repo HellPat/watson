@@ -11,7 +11,7 @@ fn binary() -> PathBuf {
 
 fn run(format: &str) -> String {
     let output = Command::new(binary())
-        .args(["php", "list-entrypoints", "--format", format, "--root"])
+        .args(["list-entrypoints", "--format", format, "--root"])
         .arg(fixture_root())
         .output()
         .expect("spawn watson");
@@ -90,7 +90,7 @@ fn blastradius_md_renders_witness_path() {
     let head_sha = capture(tmp.path(), &["rev-parse", "HEAD"]);
 
     let output = Command::new(binary())
-        .args(["php", "blastradius", "--format", "md", "--base", &base_sha, "--head", &head_sha, "--root"])
+        .args(["blastradius", &format!("{}..{}", base_sha, head_sha), "--format", "md", "--root"])
         .arg(tmp.path())
         .output()
         .expect("spawn");

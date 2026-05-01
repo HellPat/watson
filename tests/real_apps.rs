@@ -74,7 +74,7 @@ fn find_php_diff_pair(repo: &Path) -> Option<(String, String)> {
 
 fn run_blastradius_against(repo: &Path, base: &str, head: &str) -> serde_json::Value {
     let output = Command::new(binary())
-        .args(["php", "blastradius", "--base", base, "--head", head, "--root"])
+        .args(["blastradius", &format!("{base}..{head}"), "--root"])
         .arg(repo)
         .output()
         .expect("spawn watson");

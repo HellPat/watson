@@ -4,9 +4,11 @@ use anyhow::Result;
 use serde::Serialize;
 use serde_json::json;
 
+use crate::cli::Framework;
 use crate::diff::hunks::intersect_changed_symbols;
 use crate::engine::{Confidence, Engine, EntryPoint};
 use crate::git::diff::diff;
+use crate::git::spec::{DiffSpec, assert_head_matches_working_tree};
 use crate::graph::reach::{reverse_reach, AffectedEntryPoint, WitnessStep};
 use crate::output::envelope::{AnalysisEntry, Context, Envelope};
 
@@ -62,21 +64,28 @@ struct WitnessStepOut {
     confidence: Confidence,
 }
 
-pub fn run(engine: &dyn Engine, root: &Path, base: &str, head: &str) -> Result<Envelope> {
+pub fn run(
+    engine: &dyn Engine,
+    root: &Path,
+    spec: &DiffSpec,
+    framework: Framework,
+) -> Result<Envelope> {
     let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+
+    assert_head_matches_working_tree(&canonical_root, spec)?;
 
     let mut envelope = Envelope::new(
         "php",
-        "symfony",
+        framework_label(framework),
         Context {
             root: canonical_root.clone(),
-            base: Some(base.to_string()),
-            head: Some(head.to_string()),
+            base: Some(spec.base_display.clone()),
+            head: Some(spec.head_display.clone()),
         },
     );
 
     let project = engine.analyze_project(&canonical_root)?;
-    let diffs = diff(&canonical_root, base, head)?;
+    let diffs = diff(&canonical_root, spec)?;
     let changed_symbols = intersect_changed_symbols(&project, &diffs);
 
     let changed_fqns: Vec<String> = changed_symbols.iter().map(|c| c.fqn.clone()).collect();
@@ -143,6 +152,13 @@ fn witness_step_out(s: &WitnessStep) -> WitnessStepOut {
 
 fn rel(p: &Path, root: &Path) -> String {
     p.strip_prefix(root).unwrap_or(p).display().to_string()
+}
+
+fn framework_label(framework: Framework) -> &'static str {
+    match framework {
+        Framework::Symfony => "symfony",
+        Framework::Laravel => "laravel",
+    }
 }
 
 // Keep handler/EntryPoint types referenced so they're in scope for tests.

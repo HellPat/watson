@@ -4,6 +4,7 @@ use anyhow::Result;
 use serde::Serialize;
 use serde_json::json;
 
+use crate::cli::Framework;
 use crate::engine::{Engine, EntryPoint};
 use crate::output::envelope::{AnalysisEntry, Context, Envelope};
 
@@ -15,11 +16,15 @@ struct Result_ {
     entry_points: Vec<EntryPoint>,
 }
 
-pub fn run(engine: &dyn Engine, root: &Path) -> Result<Envelope> {
+pub fn run(engine: &dyn Engine, root: &Path, framework: Framework) -> Result<Envelope> {
     let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let framework_label = match framework {
+        Framework::Symfony => "symfony",
+        Framework::Laravel => "laravel",
+    };
     let mut envelope = Envelope::new(
         "php",
-        "symfony",
+        framework_label,
         Context { root: canonical_root.clone(), base: None, head: None },
     );
 
