@@ -3,6 +3,8 @@ use std::process::Command;
 
 use anyhow::{Context, Result, anyhow};
 
+use crate::git::spec::{DiffSpec, HeadKind};
+
 /// A line range within a file. Inclusive start (1-based), exclusive end.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LineRange {
@@ -26,21 +28,31 @@ pub enum ChangeStatus {
     Other,
 }
 
-/// Compute changed files and per-file new-side hunks between `base` and `head`
-/// inside `repo` by shelling out to `git diff --unified=0`.
-///
-/// We use `git` rather than `gix` for v1 — git is on every dev machine and the
-/// hunk parser is ~30 lines of straight string handling. `gix` becomes worth
-/// pulling in once we need richer history walking.
-pub fn diff(repo: &Path, base: &str, head: &str) -> Result<Vec<ChangedFile>> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(["diff", "--unified=0", "--no-color", "--no-renames"])
-        .arg(base)
-        .arg(head)
+/// Compute changed files and per-file new-side hunks per the resolved
+/// `DiffSpec`, by shelling out to `git diff --unified=0`. The head kind
+/// determines whether we add a second positional rev (commit), no second arg
+/// (working tree), or `--cached` (index).
+pub fn diff(repo: &Path, spec: &DiffSpec) -> Result<Vec<ChangedFile>> {
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(repo);
+    cmd.args(["diff", "--unified=0", "--no-color", "--no-renames"]);
+    match &spec.head {
+        HeadKind::Index => {
+            cmd.arg("--cached");
+            cmd.arg(&spec.base_sha);
+        }
+        HeadKind::WorkingTree => {
+            cmd.arg(&spec.base_sha);
+        }
+        HeadKind::Commit(head_sha) => {
+            cmd.arg(&spec.base_sha);
+            cmd.arg(head_sha);
+        }
+    }
+
+    let out = cmd
         .output()
-        .with_context(|| format!("git diff {base}..{head} in {}", repo.display()))?;
+        .with_context(|| format!("git diff in {}", repo.display()))?;
 
     if !out.status.success() {
         return Err(anyhow!(

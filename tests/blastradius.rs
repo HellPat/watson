@@ -15,7 +15,7 @@ fn binary() -> PathBuf {
 
 fn run_blastradius(base: &str, head: &str, root: &std::path::Path) -> serde_json::Value {
     let output = Command::new(binary())
-        .args(["php", "blastradius", "--base", base, "--head", head, "--root"])
+        .args(["blastradius", &format!("{base}..{head}"), "--root"])
         .arg(root)
         .output()
         .expect("spawn watson");

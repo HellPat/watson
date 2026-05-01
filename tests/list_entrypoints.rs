@@ -12,7 +12,7 @@ fn binary() -> PathBuf {
 #[test]
 fn cli_emits_envelope_with_entry_points() {
     let output = Command::new(binary())
-        .args(["php", "list-entrypoints", "--root"])
+        .args(["list-entrypoints", "--root"])
         .arg(fixture_root())
         .output()
         .expect("run watson");
@@ -90,7 +90,7 @@ fn cli_emits_envelope_with_entry_points() {
 #[test]
 fn route_entry_point_carries_http_metadata() {
     let output = Command::new(binary())
-        .args(["php", "list-entrypoints", "--root"])
+        .args(["list-entrypoints", "--root"])
         .arg(fixture_root())
         .output()
         .expect("run watson");
@@ -111,7 +111,7 @@ fn route_entry_point_carries_http_metadata() {
 #[test]
 fn periodic_task_carries_frequency() {
     let output = Command::new(binary())
-        .args(["php", "list-entrypoints", "--root"])
+        .args(["list-entrypoints", "--root"])
         .arg(fixture_root())
         .output()
         .expect("run watson");

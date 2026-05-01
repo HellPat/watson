@@ -2,6 +2,7 @@ pub mod analysis;
 pub mod cli;
 pub mod diff;
 pub mod engine;
+pub mod framework;
 pub mod git;
 pub mod graph;
 pub mod output;
