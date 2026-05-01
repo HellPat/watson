@@ -5,6 +5,7 @@ use anyhow::Result;
 use crate::engine::{Engine, ProjectIndex};
 
 pub mod analyze;
+pub mod entrypoints;
 pub mod parse;
 
 #[derive(Debug, Default)]
