@@ -36,6 +36,7 @@ pub fn analyze_project(root: &Path) -> Result<ProjectIndex> {
     let mut files_by_id: HashMap<FileId, Cow<'static, str>> = HashMap::new();
     let mut path_by_id: HashMap<FileId, PathBuf> = HashMap::new();
     let mut partial_metadatas: Vec<CodebaseMetadata> = Vec::new();
+    let mut entry_points: Vec<crate::engine::EntryPoint> = Vec::new();
 
     for path in &php_files {
         let src = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
@@ -61,6 +62,11 @@ pub fn analyze_project(root: &Path) -> Result<ProjectIndex> {
         let resolver = NameResolver::new(&arena);
         let resolved_names = resolver.resolve(program);
 
+        // Walk AST while arena is alive to collect entry-point declarations.
+        // Owned `EntryPoint`s are produced, so they outlive the arena.
+        let file_eps = super::entrypoints::extract(program, &resolved_names, &file, path);
+        entry_points.extend(file_eps);
+
         let metadata = scan_program(&arena, &file, program, &resolved_names);
         partial_metadatas.push(metadata);
 
@@ -79,11 +85,17 @@ pub fn analyze_project(root: &Path) -> Result<ProjectIndex> {
 
     let symbols = collect_symbols(&merged, &files_by_id, &path_by_id);
 
+    // Sort for deterministic output.
+    entry_points.sort_by(|a, b| {
+        (a.handler_path.as_path(), a.handler_line, a.kind.as_str(), a.name.as_str())
+            .cmp(&(b.handler_path.as_path(), b.handler_line, b.kind.as_str(), b.name.as_str()))
+    });
+
     Ok(ProjectIndex {
         root: root.to_path_buf(),
         symbols,
         edges: Vec::new(),
-        entry_points: Vec::new(),
+        entry_points,
         imports_per_file: Vec::new(),
     })
 }
