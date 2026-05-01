@@ -14,7 +14,7 @@ use std::path::PathBuf;
 
 use watson::diff::hunks::intersect_changed_symbols;
 use watson::engine::{
-    CallEdge, Confidence, Engine, EntryPoint, ProjectIndex, Symbol, SymbolKind,
+    CallEdge, Confidence, Engine, EntryPoint, EntryPointSource, ProjectIndex, Symbol, SymbolKind,
 };
 use watson::git::diff::{ChangedFile, ChangeStatus, LineRange};
 use watson::graph::reach::reverse_reach;
@@ -86,6 +86,7 @@ fn fab_index(root: &str) -> ProjectIndex {
                 handler_fqn: "web::handle".to_string(),
                 handler_path: PathBuf::from("web/router.noop"),
                 handler_line: 1,
+                source: EntryPointSource::Attribute,
                 extra: serde_json::Value::Null,
             },
             EntryPoint {
@@ -94,6 +95,7 @@ fn fab_index(root: &str) -> ProjectIndex {
                 handler_fqn: "jobs::run".to_string(),
                 handler_path: PathBuf::from("jobs/cleanup.noop"),
                 handler_line: 1,
+                source: EntryPointSource::Attribute,
                 extra: serde_json::Value::Null,
             },
         ],

@@ -4,8 +4,9 @@ use mago_database::file::File;
 use mago_names::ResolvedNames;
 use mago_span::Span;
 use mago_syntax::ast::{
-    Argument, ArgumentList, AttributeList, Class, ClassLikeMember, Enum, Expression, Identifier,
-    Interface, Literal, Method, Namespace, NamespaceBody, Program, Statement, Trait,
+    Argument, ArgumentList, AttributeList, Class, ClassLikeMember, Enum, Expression, Extends,
+    Identifier, Implements, Interface, Literal, Method, Namespace, NamespaceBody, Program,
+    Property, Statement, Trait,
 };
 
 use crate::engine::EntryPoint;
@@ -19,12 +20,22 @@ const AS_COMMAND_FQN: &str = "Symfony\\Component\\Console\\Attribute\\AsCommand"
 const AS_MESSAGE_HANDLER_FQN: &str = "Symfony\\Component\\Messenger\\Attribute\\AsMessageHandler";
 const AS_CRON_TASK_FQN: &str = "Symfony\\Component\\Scheduler\\Attribute\\AsCronTask";
 const AS_PERIODIC_TASK_FQN: &str = "Symfony\\Component\\Scheduler\\Attribute\\AsPeriodicTask";
+const AS_EVENT_LISTENER_FQN: &str = "Symfony\\Component\\EventDispatcher\\Attribute\\AsEventListener";
+const AS_SCHEDULE_FQN: &str = "Symfony\\Component\\Scheduler\\Attribute\\AsSchedule";
+
+// Marker interfaces / base classes for source-level (non-attribute) detection.
+const SF_COMMAND_BASE_FQN: &str = "Symfony\\Component\\Console\\Command\\Command";
+const SF_MESSAGE_HANDLER_INTERFACE_FQN: &str = "Symfony\\Component\\Messenger\\Handler\\MessageHandlerInterface";
+const SF_EVENT_SUBSCRIBER_INTERFACE_FQN: &str = "Symfony\\Component\\EventDispatcher\\EventSubscriberInterface";
+const SF_SCHEDULE_PROVIDER_INTERFACE_FQN: &str = "Symfony\\Component\\Scheduler\\ScheduleProviderInterface";
 
 const KIND_ROUTE: &str = "symfony.route";
 const KIND_COMMAND: &str = "symfony.command";
 const KIND_MESSAGE_HANDLER: &str = "symfony.message_handler";
 const KIND_CRON_TASK: &str = "symfony.cron_task";
 const KIND_PERIODIC_TASK: &str = "symfony.periodic_task";
+const KIND_EVENT_LISTENER: &str = "symfony.event_listener";
+const KIND_SCHEDULE_PROVIDER: &str = "symfony.schedule_provider";
 
 pub fn extract<'arena>(
     program: &'arena Program<'arena>,
@@ -79,6 +90,7 @@ fn visit_namespace<'arena>(ns: &'arena Namespace<'arena>, ctx: &mut Ctx<'_, 'are
 fn visit_class<'arena>(c: &'arena Class<'arena>, ctx: &mut Ctx<'_, 'arena>) {
     let class_fqn = qualify(&ctx.namespace, c.name.value);
     visit_class_like_attribute_lists(&class_fqn, &c.attribute_lists, c.name.span, ctx);
+    detect_interface_entry_points(&class_fqn, c, ctx);
     visit_members(&class_fqn, c.members.iter(), ctx);
 }
 
@@ -138,10 +150,123 @@ fn visit_class_like_attribute_lists<'arena>(
                 handler_fqn,
                 handler_path: path,
                 handler_line: line,
+                source: crate::engine::EntryPointSource::Attribute,
                 extra,
             });
         }
     }
+}
+
+/// Detect entry points based on the class's `extends` / `implements` clauses
+/// (no attribute required). Runs alongside the attribute walker; both can
+/// emit entries for the same class — de-duplication happens later by handler
+/// FQN.
+fn detect_interface_entry_points<'arena>(
+    class_fqn: &str,
+    c: &'arena Class<'arena>,
+    ctx: &mut Ctx<'_, 'arena>,
+) {
+    let parents = parent_fqns(c.extends.as_ref(), ctx.resolved_names);
+    let interfaces = implements_fqns(c.implements.as_ref(), ctx.resolved_names);
+    let (path, line) = locate(c.name.span, ctx);
+
+    if parents.iter().any(|p| p == SF_COMMAND_BASE_FQN) {
+        // Scan for `protected static $defaultName = '...';` first; fall back
+        // to handler_fqn if not found. setName() inside configure() requires
+        // walking method bodies — defer.
+        let cmd_name =
+            find_default_name_property(&c.members).unwrap_or_else(|| format!("{}::execute", class_fqn));
+        ctx.out.push(EntryPoint {
+            kind: KIND_COMMAND.to_string(),
+            name: cmd_name,
+            handler_fqn: format!("{}::execute", class_fqn),
+            handler_path: path.clone(),
+            handler_line: line,
+            source: crate::engine::EntryPointSource::Interface,
+            extra: serde_json::Value::Null,
+        });
+    }
+
+    if interfaces.iter().any(|i| i == SF_MESSAGE_HANDLER_INTERFACE_FQN) {
+        ctx.out.push(EntryPoint {
+            kind: KIND_MESSAGE_HANDLER.to_string(),
+            name: format!("{}::__invoke", class_fqn),
+            handler_fqn: format!("{}::__invoke", class_fqn),
+            handler_path: path.clone(),
+            handler_line: line,
+            source: crate::engine::EntryPointSource::Interface,
+            extra: serde_json::Value::Null,
+        });
+    }
+
+    if interfaces.iter().any(|i| i == SF_EVENT_SUBSCRIBER_INTERFACE_FQN) {
+        // For v0.2 we report the class as a single event-listener entry
+        // point with handler = getSubscribedEvents. Per-method extraction
+        // (parsing the static method's array literal) lands later.
+        ctx.out.push(EntryPoint {
+            kind: KIND_EVENT_LISTENER.to_string(),
+            name: format!("{}::getSubscribedEvents", class_fqn),
+            handler_fqn: format!("{}::getSubscribedEvents", class_fqn),
+            handler_path: path.clone(),
+            handler_line: line,
+            source: crate::engine::EntryPointSource::Interface,
+            extra: serde_json::Value::Null,
+        });
+    }
+
+    if interfaces.iter().any(|i| i == SF_SCHEDULE_PROVIDER_INTERFACE_FQN) {
+        ctx.out.push(EntryPoint {
+            kind: KIND_SCHEDULE_PROVIDER.to_string(),
+            name: format!("{}::getSchedule", class_fqn),
+            handler_fqn: format!("{}::getSchedule", class_fqn),
+            handler_path: path,
+            handler_line: line,
+            source: crate::engine::EntryPointSource::Interface,
+            extra: serde_json::Value::Null,
+        });
+    }
+}
+
+fn parent_fqns<'a, 'arena>(
+    extends: Option<&'a Extends<'arena>>,
+    names: &'a ResolvedNames<'arena>,
+) -> Vec<String> {
+    let Some(ext) = extends else { return Vec::new() };
+    ext.types
+        .iter()
+        .filter_map(|id| resolve_identifier(id, names).map(|s| s.to_string()))
+        .collect()
+}
+
+fn implements_fqns<'a, 'arena>(
+    implements: Option<&'a Implements<'arena>>,
+    names: &'a ResolvedNames<'arena>,
+) -> Vec<String> {
+    let Some(imp) = implements else { return Vec::new() };
+    imp.types
+        .iter()
+        .filter_map(|id| resolve_identifier(id, names).map(|s| s.to_string()))
+        .collect()
+}
+
+fn find_default_name_property<'arena>(
+    members: &'arena mago_syntax::ast::Sequence<'arena, ClassLikeMember<'arena>>,
+) -> Option<String> {
+    for member in members.iter() {
+        let ClassLikeMember::Property(prop) = member else { continue };
+        let Property::Plain(plain) = prop else { continue };
+        for item in plain.items.iter() {
+            // PropertyItem is either Concrete (= value) or Abstract.
+            let mago_syntax::ast::PropertyItem::Concrete(concrete) = item else { continue };
+            let var_name = concrete.variable.name;
+            if var_name.eq_ignore_ascii_case("$defaultName")
+                && let Some(s) = string_literal(concrete.value)
+            {
+                return Some(s.to_string());
+            }
+        }
+    }
+    None
 }
 
 fn visit_method<'arena>(class_fqn: &str, m: &'arena Method<'arena>, ctx: &mut Ctx<'_, 'arena>) {
@@ -166,6 +291,7 @@ fn visit_method<'arena>(class_fqn: &str, m: &'arena Method<'arena>, ctx: &mut Ct
                 handler_fqn: handler_fqn.clone(),
                 handler_path: path.clone(),
                 handler_line: line,
+                source: crate::engine::EntryPointSource::Attribute,
                 extra,
             });
         }
@@ -180,6 +306,8 @@ fn match_class_attr(fqn: &str) -> Option<(&'static str, &'static str)> {
         AS_MESSAGE_HANDLER_FQN => Some((KIND_MESSAGE_HANDLER, "__invoke")),
         AS_CRON_TASK_FQN => Some((KIND_CRON_TASK, "__invoke")),
         AS_PERIODIC_TASK_FQN => Some((KIND_PERIODIC_TASK, "__invoke")),
+        AS_EVENT_LISTENER_FQN => Some((KIND_EVENT_LISTENER, "__invoke")),
+        AS_SCHEDULE_FQN => Some((KIND_SCHEDULE_PROVIDER, "getSchedule")),
         _ => None,
     }
 }
@@ -191,6 +319,7 @@ fn match_method_attr(fqn: &str) -> Option<&'static str> {
     match fqn {
         AS_CRON_TASK_FQN => Some(KIND_CRON_TASK),
         AS_PERIODIC_TASK_FQN => Some(KIND_PERIODIC_TASK),
+        AS_EVENT_LISTENER_FQN => Some(KIND_EVENT_LISTENER),
         _ => None,
     }
 }

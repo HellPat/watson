@@ -109,3 +109,49 @@ namespace Symfony\Component\HttpKernel {
         }
     }
 }
+
+namespace Symfony\Component\Messenger\Handler {
+    interface MessageHandlerInterface
+    {
+    }
+}
+
+namespace Symfony\Component\EventDispatcher {
+    interface EventSubscriberInterface
+    {
+        public static function getSubscribedEvents(): array;
+    }
+
+    namespace Attribute {
+        #[\Attribute(\Attribute::TARGET_CLASS | \Attribute::TARGET_METHOD | \Attribute::IS_REPEATABLE)]
+        class AsEventListener
+        {
+            public function __construct(
+                ?string $event = null,
+                ?string $method = null,
+                int $priority = 0,
+            ) {}
+        }
+    }
+}
+
+namespace Symfony\Component\Scheduler {
+    interface ScheduleProviderInterface
+    {
+        public function getSchedule(): Schedule;
+    }
+
+    class Schedule
+    {
+    }
+
+    namespace Attribute {
+        #[\Attribute(\Attribute::TARGET_CLASS)]
+        class AsSchedule
+        {
+            public function __construct(string $name = 'default')
+            {
+            }
+        }
+    }
+}
