@@ -106,7 +106,8 @@ fn fab_index(root: &str) -> ProjectIndex {
 #[test]
 fn reverse_reach_works_for_noop_engine() {
     let index = fab_index("/imaginary/project");
-    let affected = reverse_reach(&index, &["service::format".to_string()]);
+    let reach = reverse_reach(&index, &["service::format".to_string()]);
+    let affected = reach.affected;
 
     assert_eq!(affected.len(), 2, "both entry points should be affected");
     let kinds: Vec<&str> = affected
@@ -120,7 +121,8 @@ fn reverse_reach_works_for_noop_engine() {
 #[test]
 fn reverse_reach_walks_transitively() {
     let index = fab_index("/imaginary/project");
-    let affected = reverse_reach(&index, &["service::lower".to_string()]);
+    let reach = reverse_reach(&index, &["service::lower".to_string()]);
+    let affected = reach.affected;
 
     assert_eq!(affected.len(), 2, "both entry points reach lower transitively");
     for aep in &affected {
@@ -148,10 +150,23 @@ fn changed_engine_handler_is_self_affected() {
     // When the changed symbol IS an entry-point handler, reach reports it
     // with an empty witness path. Pure logic, no engine involved.
     let index = fab_index("/imaginary/project");
-    let affected = reverse_reach(&index, &["web::handle".to_string()]);
+    let reach = reverse_reach(&index, &["web::handle".to_string()]);
+    let affected = reach.affected;
 
     assert_eq!(affected.len(), 1);
     assert!(affected[0].witness.is_empty());
+}
+
+#[test]
+fn affects_inverse_mapping_populated() {
+    let index = fab_index("/imaginary/project");
+    let reach = reverse_reach(&index, &["service::format".to_string()]);
+
+    let bucket = reach
+        .affects_by_changed
+        .get("service::format")
+        .expect("service::format should map to its affected entry points");
+    assert_eq!(bucket.len(), 2, "service::format reaches both entry points");
 }
 
 #[test]

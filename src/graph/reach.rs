@@ -23,12 +23,21 @@ pub struct AffectedEntryPoint {
     pub min_confidence: Confidence,
 }
 
+/// Result of `reverse_reach`. `affected` is the per-entry-point list (with
+/// witness paths). `affects_by_changed` is the inverse mapping: for each
+/// changed FQN, which entry points it reaches. Both views derive from the
+/// same BFS pass.
+pub struct ReachResult {
+    pub affected: Vec<AffectedEntryPoint>,
+    pub affects_by_changed: HashMap<String, Vec<usize>>,
+}
+
 pub fn reverse_reach(
     project: &ProjectIndex,
     changed_fqns: &[String],
-) -> Vec<AffectedEntryPoint> {
+) -> ReachResult {
     if changed_fqns.is_empty() || project.entry_points.is_empty() {
-        return Vec::new();
+        return ReachResult { affected: Vec::new(), affects_by_changed: HashMap::new() };
     }
 
     let changed_set: HashSet<String> = changed_fqns.iter().map(|f| normalise(f)).collect();
@@ -47,6 +56,7 @@ pub fn reverse_reach(
     }
 
     let mut affected: HashMap<usize, AffectedEntryPoint> = HashMap::new();
+    let mut affects_by_changed: HashMap<String, Vec<usize>> = HashMap::new();
 
     // Reverse-BFS from every changed symbol. The frontier walks "callers of"
     // the current node by following back-edges (we have callee -> callers via
@@ -92,6 +102,12 @@ pub fn reverse_reach(
                             witness: witness.clone(),
                             min_confidence: min_conf,
                         });
+
+                    // Track inverse: which changed symbol reached this ep.
+                    let bucket = affects_by_changed.entry(changed_fqn.clone()).or_default();
+                    if !bucket.contains(&ep_idx) {
+                        bucket.push(ep_idx);
+                    }
                 }
             }
 
@@ -112,7 +128,13 @@ pub fn reverse_reach(
     // Stable order: by entry_point_index.
     let mut out: Vec<AffectedEntryPoint> = affected.into_values().collect();
     out.sort_by_key(|a| a.entry_point_index);
-    out
+
+    // Sort each affects_by_changed bucket for deterministic output.
+    for bucket in affects_by_changed.values_mut() {
+        bucket.sort_unstable();
+    }
+
+    ReachResult { affected: out, affects_by_changed }
 }
 
 /// Reconstruct the witness path from a handler node back to the changed symbol

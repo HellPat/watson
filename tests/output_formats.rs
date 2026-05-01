@@ -113,8 +113,9 @@ fn blastradius_md_renders_witness_path() {
     assert!(stdout.contains("Witness path:"));
     assert!(stdout.contains("```text"));
     // Specific entry-point kinds.
-    assert!(stdout.contains("`symfony.route`"));
-    assert!(stdout.contains("greet_show"));
+    // Per-kind grouping: kind appears as a section heading.
+    assert!(stdout.contains("#### symfony.route ("));
+    assert!(stdout.contains("##### greet_show"));
 }
 
 fn copy_tree(src: &std::path::Path, dst: &std::path::Path) {

@@ -10,6 +10,8 @@ use crate::engine::{Confidence, Engine, EntryPoint};
 use crate::git::diff::diff;
 use crate::git::spec::{DiffSpec, assert_head_matches_working_tree};
 use crate::graph::reach::{reverse_reach, AffectedEntryPoint, WitnessStep};
+
+fn lowercase(s: &str) -> String { s.to_lowercase() }
 use crate::output::envelope::{AnalysisEntry, Context, Envelope};
 
 pub const NAME: &str = "blastradius";
@@ -36,6 +38,16 @@ struct ChangedSymbolOut {
     line_start: u32,
     line_end: u32,
     whole_file_gone: bool,
+    /// Which entry points this changed symbol transitively reaches.
+    /// `ep_index` is an index into `affected_entry_points`.
+    affects: Vec<AffectsRef>,
+}
+
+#[derive(Debug, Serialize)]
+struct AffectsRef {
+    kind: String,
+    name: String,
+    ep_index: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -89,7 +101,16 @@ pub fn run(
     let changed_symbols = intersect_changed_symbols(&project, &diffs);
 
     let changed_fqns: Vec<String> = changed_symbols.iter().map(|c| c.fqn.clone()).collect();
-    let affected = reverse_reach(&project, &changed_fqns);
+    let reach = reverse_reach(&project, &changed_fqns);
+    let affected = &reach.affected;
+
+    // Map source ep_index -> position in the (possibly truncated/sorted)
+    // affected list so `ep_index` in changed_symbols.affects[] matches.
+    let ep_index_in_output: std::collections::HashMap<usize, usize> = affected
+        .iter()
+        .enumerate()
+        .map(|(out_idx, a)| (a.entry_point_index, out_idx))
+        .collect();
 
     let result = Result_ {
         summary: Summary {
@@ -99,12 +120,33 @@ pub fn run(
         },
         changed_symbols: changed_symbols
             .iter()
-            .map(|c| ChangedSymbolOut {
-                fqn: c.fqn.clone(),
-                path: rel(&c.path, &canonical_root),
-                line_start: c.line_start,
-                line_end: c.line_end,
-                whole_file_gone: c.whole_file_gone,
+            .map(|c| {
+                let lower = lowercase(&c.fqn);
+                let affects = reach
+                    .affects_by_changed
+                    .get(&lower)
+                    .map(|eps| {
+                        eps.iter()
+                            .filter_map(|orig_idx| {
+                                let out_idx = ep_index_in_output.get(orig_idx)?;
+                                let ep = project.entry_points.get(*orig_idx)?;
+                                Some(AffectsRef {
+                                    kind: ep.kind.clone(),
+                                    name: ep.name.clone(),
+                                    ep_index: *out_idx,
+                                })
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                ChangedSymbolOut {
+                    fqn: c.fqn.clone(),
+                    path: rel(&c.path, &canonical_root),
+                    line_start: c.line_start,
+                    line_end: c.line_end,
+                    whole_file_gone: c.whole_file_gone,
+                    affects,
+                }
             })
             .collect(),
         affected_entry_points: affected
