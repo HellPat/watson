@@ -149,7 +149,32 @@ Output shape and format flags match `blastradius`.
 8. Reverse-BFS from each changed symbol through the call graph; record one shortest witness path per affected entry point, plus an inverse `affects_by_changed` mapping.
 9. Project everything onto the JSON envelope; render Markdown / Text on top.
 
-Performance on `~/easy-plu/backend` (real Laravel app, 4437 PHP files outside vendor): blastradius vs HEAD~10 is ~0.6s wall.
+Performance on `~/easy-plu/backend` (real Laravel app, 4437 PHP files outside vendor): blastradius vs HEAD~10 is ~1.3s wall, list-entrypoints is ~0.9s wall.
+
+---
+
+## Validated against
+
+`tests/real_apps.rs` runs `#[ignore]`d smoke tests against three real-world projects from local disk:
+
+| Project | Framework | Files (non-vendor) | Recent diff result |
+| --- | --- | --- | --- |
+| team-up (Symfony) | Symfony 7 | 171 | 36 files, 124 symbols, 5 routes affected (admin Saisonrahmen) |
+| project-l | Symfony 7 | ~395 | 16 files, 2 symbols, 0 affected (UI-only fix) |
+| easy-plu/backend | Laravel 11 | 4,437 | 131 files, **165 symbols**, 3 affected (2 commands + 1 job) |
+
+Run them locally:
+
+```bash
+cargo test --test real_apps -- --ignored --nocapture
+# Override paths via env vars:
+WATSON_TEAM_UP_ROOT=/path \
+WATSON_PROJECT_L_ROOT=/path \
+WATSON_EASY_PLU_ROOT=/path/backend \
+  cargo test --test real_apps -- --ignored --nocapture
+```
+
+The smoke harness picks a recent commit pair from each repo's history that touches PHP, runs blastradius, and asserts the envelope shape + framework auto-detection. It does not assert exact numbers (those rotate with the real-app history).
 
 ---
 

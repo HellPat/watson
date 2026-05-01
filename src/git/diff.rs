@@ -63,7 +63,29 @@ pub fn diff(repo: &Path, spec: &DiffSpec) -> Result<Vec<ChangedFile>> {
     }
 
     let stdout = String::from_utf8(out.stdout).context("git diff stdout not utf-8")?;
-    parse_unified(&stdout, repo)
+    // git diff emits paths relative to the *git root* (could be a parent of
+    // `repo` in monorepo layouts where `.git` lives above the watson root).
+    // Resolve them against the git root so the resulting absolute paths line
+    // up with the on-disk symbol locations.
+    let git_root = git_toplevel(repo)?;
+    parse_unified(&stdout, &git_root)
+}
+
+fn git_toplevel(repo: &Path) -> Result<PathBuf> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .with_context(|| format!("git rev-parse --show-toplevel in {}", repo.display()))?;
+    if !out.status.success() {
+        return Err(anyhow!(
+            "git rev-parse --show-toplevel failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let s = String::from_utf8(out.stdout)?.trim().to_string();
+    Ok(PathBuf::from(s))
 }
 
 fn parse_unified(text: &str, repo: &Path) -> Result<Vec<ChangedFile>> {
