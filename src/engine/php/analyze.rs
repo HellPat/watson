@@ -22,6 +22,7 @@ use mago_syntax::parser::parse_file;
 use rayon::prelude::*;
 
 use crate::engine::{CallEdge, Confidence, EntryPoint, ProjectIndex, Symbol, SymbolKind};
+use crate::util::warn as tracing_warn;
 
 /// Multi-file PHP analysis pipeline modelled on mago's
 /// `crates/orchestrator/src/service/pipeline.rs`. Runs in parallel via rayon
@@ -133,7 +134,8 @@ pub fn analyze_project(root: &Path) -> Result<ProjectIndex> {
             .cmp(&(b.handler_path.as_path(), b.handler_line, b.kind.as_str(), b.name.as_str()))
     });
 
-    let symbols = collect_symbols(&merged, &files, &path_by_id);
+    let files_by_id: HashMap<FileId, &File> = files.iter().map(|f| (f.id, f)).collect();
+    let symbols = collect_symbols(&merged, &files_by_id, &path_by_id);
 
     Ok(ProjectIndex {
         root: root.to_path_buf(),
@@ -176,14 +178,14 @@ fn discover_php(root: &Path) -> Result<Vec<PathBuf>> {
 
 fn collect_symbols(
     codebase: &CodebaseMetadata,
-    files: &[File],
+    files_by_id: &HashMap<FileId, &File>,
     path_by_id: &HashMap<FileId, PathBuf>,
 ) -> Vec<Symbol> {
     let mut symbols = Vec::new();
 
     for (fqn, class_meta) in codebase.class_likes.iter() {
         let kind = map_class_kind(class_meta.kind);
-        if let Some((path, ls, le)) = locate_span(class_meta.span, files, path_by_id) {
+        if let Some((path, ls, le)) = locate_span(class_meta.span, files_by_id, path_by_id) {
             symbols.push(Symbol {
                 fqn: fqn.as_str().to_string(),
                 kind,
@@ -195,7 +197,7 @@ fn collect_symbols(
 
         for (method_name, method_id) in class_meta.declaring_method_ids.iter() {
             if let Some(method_meta) = codebase.get_method_by_id(method_id)
-                && let Some((path, ls, le)) = locate_span(method_meta.span, files, path_by_id)
+                && let Some((path, ls, le)) = locate_span(method_meta.span, files_by_id, path_by_id)
             {
                 symbols.push(Symbol {
                     fqn: format!("{}::{}", fqn.as_str(), method_name.as_str()),
@@ -213,7 +215,7 @@ fn collect_symbols(
             continue;
         }
         if fn_meta.name.is_some()
-            && let Some((path, ls, le)) = locate_span(fn_meta.span, files, path_by_id)
+            && let Some((path, ls, le)) = locate_span(fn_meta.span, files_by_id, path_by_id)
         {
             symbols.push(Symbol {
                 fqn: name.as_str().to_string(),
@@ -232,9 +234,13 @@ fn collect_symbols(
     symbols
 }
 
-fn locate_span(span: Span, files: &[File], path_by_id: &HashMap<FileId, PathBuf>) -> Option<(PathBuf, u32, u32)> {
+fn locate_span(
+    span: Span,
+    files_by_id: &HashMap<FileId, &File>,
+    path_by_id: &HashMap<FileId, PathBuf>,
+) -> Option<(PathBuf, u32, u32)> {
     let path = path_by_id.get(&span.file_id)?.clone();
-    let file = files.iter().find(|f| f.id == span.file_id)?;
+    let file = files_by_id.get(&span.file_id)?;
     let line_start = file.line_number(span.start.offset) + 1;
     let line_end = file.line_number(span.end.offset) + 1;
     Some((path, line_start, line_end))
@@ -281,9 +287,6 @@ fn format_symbol_id(id: &mago_codex::symbol::SymbolIdentifier) -> String {
     }
 }
 
-fn tracing_warn(msg: String) {
-    eprintln!("watson: {msg}");
-}
 
 /// Two detectors can fire for the same handler — e.g. a class with `#[AsCommand]`
 /// also extends `Command`. Keep the most informative one. Source priority:

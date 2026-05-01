@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::engine::{CallEdge, Confidence, EntryPoint, ProjectIndex};
+use crate::util::normalize_identifier;
 
 /// One step on a witness path: caller -> callee at a specific site.
 #[derive(Debug, Clone)]
@@ -167,10 +168,7 @@ fn reconstruct_witness(
 
 #[inline]
 fn normalise(fqn: &str) -> String {
-    // PHP is case-insensitive on class/function/method names. Mago normalises
-    // to lowercase internally; we follow suit for matching while preserving the
-    // original case in the displayed output (witness steps store the original).
-    fqn.to_lowercase()
+    normalize_identifier(fqn)
 }
 
 /// Look up an entry point by index — used by callers building the JSON output.

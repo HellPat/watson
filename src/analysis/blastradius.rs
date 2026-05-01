@@ -6,12 +6,11 @@ use serde_json::json;
 
 use crate::cli::Framework;
 use crate::diff::hunks::intersect_changed_symbols;
-use crate::engine::{Confidence, Engine, EntryPoint};
+use crate::engine::{Confidence, Engine};
 use crate::git::diff::diff;
 use crate::git::spec::{DiffSpec, assert_head_matches_working_tree};
-use crate::graph::reach::{reverse_reach, AffectedEntryPoint, WitnessStep};
-
-fn lowercase(s: &str) -> String { s.to_lowercase() }
+use crate::graph::reach::{reverse_reach, WitnessStep};
+use crate::util::normalize_identifier;
 use crate::output::envelope::{AnalysisEntry, Context, Envelope};
 
 pub const NAME: &str = "blastradius";
@@ -121,7 +120,7 @@ pub fn run(
         changed_symbols: changed_symbols
             .iter()
             .map(|c| {
-                let lower = lowercase(&c.fqn);
+                let lower = normalize_identifier(&c.fqn);
                 let affects = reach
                     .affects_by_changed
                     .get(&lower)
@@ -203,6 +202,3 @@ fn framework_label(framework: Framework) -> &'static str {
     }
 }
 
-// Keep handler/EntryPoint types referenced so they're in scope for tests.
-#[allow(dead_code)]
-fn _ep_marker(_: &EntryPoint, _: &AffectedEntryPoint) {}
