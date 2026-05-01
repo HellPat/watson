@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-
 use anyhow::{Context, Result};
 use bumpalo::Bump;
 use foldhash::HashSet as FoldHashSet;
@@ -17,104 +16,114 @@ use mago_codex::reference::SymbolReferences;
 use mago_codex::scanner::scan_program;
 use mago_codex::symbol::SymbolKind as MagoSymbolKind;
 use mago_database::file::{File, FileId};
-use mago_names::ResolvedNames;
 use mago_names::resolver::NameResolver;
 use mago_span::Span;
-use mago_syntax::ast::Program;
 use mago_syntax::parser::parse_file;
+use rayon::prelude::*;
 
 use crate::engine::{CallEdge, Confidence, EntryPoint, ProjectIndex, Symbol, SymbolKind};
 
 /// Multi-file PHP analysis pipeline modelled on mago's
-/// `crates/orchestrator/src/service/pipeline.rs`.
+/// `crates/orchestrator/src/service/pipeline.rs`. Runs in parallel via rayon
+/// — each thread keeps its own `bumpalo::Bump` arena and the per-file outputs
+/// (partial `CodebaseMetadata`, entry points) merge after the parallel pass.
 ///
-/// Strategy: a single `Bump` arena spans the whole call. We parse + scan in the
-/// first pass (collecting entry points along the way while the AST is alive),
-/// merge `CodebaseMetadata`, populate cross-references, then run
-/// `mago_analyzer::Analyzer` over every program a second time so that
-/// `SymbolReferences` is fully populated. The reverse-call-graph data lives in
-/// `SymbolReferences::get_back_references()` after the analyzer pass; we convert
-/// it into our neutral `CallEdge` list before handing the `ProjectIndex` back.
+/// Pass 1 (per-file, parallel): parse → resolve → entry-point AST walk →
+/// `scan_program`. Returns owned `CodebaseMetadata` (interned, arena-free) and
+/// owned `EntryPoint`s.
+/// Merge: extend partials into a single `CodebaseMetadata`; run
+/// `populate_codebase` once.
+/// Pass 2 (per-file, parallel): re-parse → resolve → run `Analyzer::analyze`,
+/// returning a per-file `AnalysisResult` whose `symbol_references` we merge
+/// into a single map at the end.
 pub fn analyze_project(root: &Path) -> Result<ProjectIndex> {
     let php_files = discover_php(root).with_context(|| format!("scan PHP files in {}", root.display()))?;
 
-    let arena = Bump::new();
-
-    // Owned per-file context held for the analyzer pass.
+    // Build owned File objects up-front so per-thread re-parsing can borrow them.
     let mut files: Vec<File> = Vec::with_capacity(php_files.len());
-    let mut paths: Vec<PathBuf> = Vec::with_capacity(php_files.len());
     let mut path_by_id: HashMap<FileId, PathBuf> = HashMap::new();
-    let mut programs: Vec<&Program<'_>> = Vec::with_capacity(php_files.len());
-    let mut resolved_names_list: Vec<ResolvedNames<'_>> = Vec::with_capacity(php_files.len());
-    let mut partial_metadatas: Vec<CodebaseMetadata> = Vec::with_capacity(php_files.len());
-    let mut entry_points: Vec<EntryPoint> = Vec::new();
-
     for path in &php_files {
         let src = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
         let rel = path.strip_prefix(root).unwrap_or(path).display().to_string();
         let file = File::ephemeral(Cow::Owned(rel), Cow::Owned(src));
-
         path_by_id.insert(file.id, path.clone());
         files.push(file);
-        paths.push(path.clone());
     }
 
-    // Pass 1: parse + resolve + entry-point extract + scan_program.
-    for idx in 0..files.len() {
-        let file = &files[idx];
-        let path = &paths[idx];
+    // ----- Pass 1: parse + resolve + entrypoints + scan_program in parallel -----
+    let pass1_outputs: Vec<(CodebaseMetadata, Vec<EntryPoint>)> = files
+        .par_iter()
+        .zip(php_files.par_iter())
+        .map_init(Bump::new, |arena, (file, abs_path)| {
+            let program = parse_file(arena, file);
+            if program.has_errors() {
+                tracing_warn(format!(
+                    "parse errors in {} (continuing): {} error(s)",
+                    abs_path.display(),
+                    program.errors.len()
+                ));
+            }
+            let resolver = NameResolver::new(arena);
+            let resolved_names = resolver.resolve(program);
 
-        let program = parse_file(&arena, file);
-        if program.has_errors() {
-            tracing_warn(format!(
-                "parse errors in {} (continuing): {} error(s)",
-                path.display(),
-                program.errors.len()
-            ));
-        }
+            let eps = super::entrypoints::extract(program, &resolved_names, file, abs_path);
+            let metadata = scan_program(arena, file, program, &resolved_names);
 
-        let resolver = NameResolver::new(&arena);
-        let resolved_names = resolver.resolve(program);
+            arena.reset();
+            (metadata, eps)
+        })
+        .collect();
 
-        // Walk the AST while it is alive to extract entry points.
-        let file_eps = super::entrypoints::extract(program, &resolved_names, file, path);
-        entry_points.extend(file_eps);
-
-        let metadata = scan_program(&arena, file, program, &resolved_names);
-        partial_metadatas.push(metadata);
-
-        programs.push(program);
-        resolved_names_list.push(resolved_names);
-    }
-
-    // Merge per-file metadata into the global codebase view.
+    // Merge per-file metadata + entry points sequentially.
     let mut merged = CodebaseMetadata::new();
-    for partial in partial_metadatas {
+    let mut entry_points: Vec<EntryPoint> = Vec::new();
+    for (partial, eps) in pass1_outputs {
         merged.extend(partial);
+        entry_points.extend(eps);
     }
 
-    // Populate hierarchies + initial symbol references (signature-level edges).
+    // Populate hierarchies + signature-level edges.
     let mut symbol_references = SymbolReferences::new();
     populate_codebase(&mut merged, &mut symbol_references, AtomSet::default(), FoldHashSet::default());
 
-    // Pass 2: run the analyzer on each program so body-level call edges flow
-    // into `analysis_result.symbol_references`.
+    // ----- Pass 2: per-file analyzer in parallel -----
     let plugin_registry = PluginRegistry::with_library_providers();
     let settings = Settings::default();
-    let mut analysis_result = AnalysisResult::new(symbol_references);
 
-    for idx in 0..files.len() {
-        let file = &files[idx];
-        let program = programs[idx];
-        let names = &resolved_names_list[idx];
+    // Pass 2: per-file analyzer in parallel. Each rayon worker keeps its own
+    // arena + a local AnalysisResult; we merge at the end. mago expects
+    // analyzer.analyze() to mutate its `analysis_result` in place, so we run
+    // one local result per file and merge SymbolReferences after the parallel
+    // map.
+    let local_results: Vec<SymbolReferences> = files
+        .par_iter()
+        .zip(php_files.par_iter())
+        .map_init(Bump::new, |arena, (file, abs_path)| {
+            let program = parse_file(arena, file);
+            let resolver = NameResolver::new(arena);
+            let resolved_names = resolver.resolve(program);
 
-        let analyzer = Analyzer::new(&arena, file, names, &merged, &plugin_registry, settings.clone());
-        if let Err(err) = analyzer.analyze(program, &mut analysis_result) {
-            tracing_warn(format!("analyzer error in {} (continuing): {err}", paths[idx].display()));
-        }
+            let mut local = AnalysisResult::new(SymbolReferences::new());
+            let analyzer = Analyzer::new(
+                arena,
+                file,
+                &resolved_names,
+                &merged,
+                &plugin_registry,
+                settings.clone(),
+            );
+            if let Err(err) = analyzer.analyze(program, &mut local) {
+                tracing_warn(format!("analyzer error in {} (continuing): {err}", abs_path.display()));
+            }
+            arena.reset();
+            local.symbol_references
+        })
+        .collect();
+
+    for local in local_results {
+        symbol_references.extend(local);
     }
-
-    let edges = symbol_references_to_edges(&analysis_result.symbol_references);
+    let edges = symbol_references_to_edges(&symbol_references);
 
     // Sort entry points for deterministic output.
     entry_points.sort_by(|a, b| {
@@ -150,9 +159,6 @@ fn discover_php(root: &Path) -> Result<Vec<PathBuf>> {
                 //   var          — Symfony / Laravel runtime cache + logs
                 //   .git         — git plumbing (required so we don't crawl pack files)
                 //   .worktrees   — git-attached, often holds duplicate PHP trees
-                // Other choices (IDE folders, node_modules, build/tmp/cache)
-                // belong to other ecosystems or to the user's configuration —
-                // we'll surface those via a configurable ignore list later.
                 if matches!(file_name, ".git" | ".worktrees" | "vendor" | "var") {
                     continue;
                 }
@@ -243,8 +249,7 @@ fn map_class_kind(kind: MagoSymbolKind) -> SymbolKind {
 
 /// Convert mago's populated [`SymbolReferences`] into our neutral [`CallEdge`]
 /// list. We use the back-reference map (callee -> callers) which mago populates
-/// during analysis. Site path/line are not stored in the back-reference index;
-/// phase-5 will enrich edges with sites if/when we need them for witness paths.
+/// during analysis. Site path/line are not stored in the back-reference index.
 fn symbol_references_to_edges(refs: &SymbolReferences) -> Vec<CallEdge> {
     let mut out = Vec::new();
     for (callee, callers) in refs.get_back_references() {
@@ -259,7 +264,6 @@ fn symbol_references_to_edges(refs: &SymbolReferences) -> Vec<CallEdge> {
             });
         }
     }
-    // Stable order for snapshots.
     out.sort_by(|a, b| (a.from_fqn.as_str(), a.to_fqn.as_str()).cmp(&(b.from_fqn.as_str(), b.to_fqn.as_str())));
     out.dedup_by(|a, b| a.from_fqn == b.from_fqn && a.to_fqn == b.to_fqn);
     out

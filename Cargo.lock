@@ -1547,6 +1547,7 @@ dependencies = [
  "mago-php-version",
  "mago-span",
  "mago-syntax",
+ "rayon",
  "serde",
  "serde_json",
  "tempfile",
