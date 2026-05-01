@@ -2,7 +2,7 @@ use std::io;
 
 use anyhow::Result;
 use clap::Parser;
-use watson::analysis::list_entrypoints;
+use watson::analysis::{blastradius, list_entrypoints};
 use watson::cli::{Cli, Language, PhpAnalysis};
 use watson::engine::php::PhpEngine;
 use watson::output::json::write_envelope;
@@ -11,9 +11,10 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.language {
         Language::Php { analysis } => match analysis {
-            PhpAnalysis::Blastradius { .. } => {
-                eprintln!("watson php blastradius: not implemented (phase-5)");
-                std::process::exit(2);
+            PhpAnalysis::Blastradius { base, head, root, .. } => {
+                let engine = PhpEngine::new();
+                let envelope = blastradius::run(&engine, &root, &base, &head)?;
+                write_envelope(io::stdout().lock(), &envelope)?;
             }
             PhpAnalysis::ListEntrypoints { root } => {
                 let engine = PhpEngine::new();
