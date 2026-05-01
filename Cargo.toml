@@ -14,7 +14,6 @@ mago-database = "=1.25.1"
 mago-span = "=1.25.1"
 mago-atom = "=1.25.1"
 mago-php-version = "=1.25.1"
-mago-collector = "=1.25.1"
 bumpalo = "3"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }

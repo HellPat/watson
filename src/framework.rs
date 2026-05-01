@@ -30,19 +30,19 @@ fn detect_from_composer(root: &Path) -> Option<Framework> {
     let raw = fs::read_to_string(composer).ok()?;
     let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
 
-    let requires = value
+    let requires: Vec<&str> = value
         .get("require")
         .and_then(|v| v.as_object())
         .into_iter()
-        .chain(value.get("require-dev").and_then(|v| v.as_object()).into_iter())
+        .chain(value.get("require-dev").and_then(|v| v.as_object()))
         .flatten()
         .map(|(k, _)| k.as_str())
-        .collect::<Vec<_>>();
+        .collect();
 
-    if requires.iter().any(|k| *k == "laravel/framework") {
+    if requires.contains(&"laravel/framework") {
         return Some(Framework::Laravel);
     }
-    if requires.iter().any(|k| *k == "symfony/framework-bundle") {
+    if requires.contains(&"symfony/framework-bundle") {
         return Some(Framework::Symfony);
     }
     None

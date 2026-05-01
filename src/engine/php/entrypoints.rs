@@ -9,7 +9,7 @@ use mago_syntax::ast::{
     NamespaceBody, Program, Property, Statement, StaticMethodCall, Trait,
 };
 
-use crate::engine::EntryPoint;
+use crate::engine::{EntryPoint, EntryPointSource};
 
 // FQNs of the Symfony attributes we recognise.
 const ROUTE_FQNS: &[&str] = &[
@@ -195,7 +195,7 @@ fn emit_laravel_route<'arena>(
     let line = ctx.file.line_number(offset) + 1;
     let path = ctx.abs_path.clone();
 
-    if ROUTE_HTTP_METHODS.iter().any(|h| *h == mlow.as_str()) {
+    if ROUTE_HTTP_METHODS.contains(&mlow.as_str()) {
         let uri = first_positional_string(args).map(|s| s.to_string()).unwrap_or_default();
         let handler = extract_laravel_handler(args, ctx.resolved_names)
             .unwrap_or_else(|| "<closure>".to_string());
@@ -212,10 +212,10 @@ fn emit_laravel_route<'arena>(
             handler_fqn: handler,
             handler_path: path,
             handler_line: line,
-            source: crate::engine::EntryPointSource::StaticCall,
+            source: EntryPointSource::StaticCall,
             extra: serde_json::json!({ "path": uri, "methods": methods }),
         });
-    } else if ROUTE_RESOURCE_METHODS.iter().any(|r| *r == method) {
+    } else if ROUTE_RESOURCE_METHODS.contains(&method) {
         // Resource: name + controller class. v0.2 emits a single entry per
         // resource (not the seven sub-routes); a follow-up phase can expand.
         let name = first_positional_string(args).map(|s| s.to_string()).unwrap_or_default();
@@ -227,10 +227,10 @@ fn emit_laravel_route<'arena>(
             handler_fqn: handler,
             handler_path: path,
             handler_line: line,
-            source: crate::engine::EntryPointSource::StaticCall,
+            source: EntryPointSource::StaticCall,
             extra: serde_json::json!({ "path": name, "kind": method }),
         });
-    } else if ROUTE_TERMINAL_METHODS.iter().any(|t| *t == method) {
+    } else if ROUTE_TERMINAL_METHODS.contains(&method) {
         let uri = first_positional_string(args).map(|s| s.to_string()).unwrap_or_default();
         ctx.out.push(EntryPoint {
             kind: KIND_LV_ROUTE.to_string(),
@@ -238,7 +238,7 @@ fn emit_laravel_route<'arena>(
             handler_fqn: format!("<{}>", method),
             handler_path: path,
             handler_line: line,
-            source: crate::engine::EntryPointSource::StaticCall,
+            source: EntryPointSource::StaticCall,
             extra: serde_json::json!({ "path": uri, "kind": method }),
         });
     }
@@ -261,7 +261,7 @@ fn emit_laravel_schedule<'arena>(
                 handler_fqn: cmd.clone(),
                 handler_path: path,
                 handler_line: line,
-                source: crate::engine::EntryPointSource::StaticCall,
+                source: EntryPointSource::StaticCall,
                 extra: serde_json::json!({ "kind": "command", "command": cmd }),
             });
         }
@@ -274,7 +274,7 @@ fn emit_laravel_schedule<'arena>(
                 handler_fqn: format!("{}::handle", job_class),
                 handler_path: path,
                 handler_line: line,
-                source: crate::engine::EntryPointSource::StaticCall,
+                source: EntryPointSource::StaticCall,
                 extra: serde_json::json!({ "kind": "job", "job": job_class }),
             });
         }
@@ -285,7 +285,7 @@ fn emit_laravel_schedule<'arena>(
                 handler_fqn: "<closure>".to_string(),
                 handler_path: path,
                 handler_line: line,
-                source: crate::engine::EntryPointSource::StaticCall,
+                source: EntryPointSource::StaticCall,
                 extra: serde_json::json!({ "kind": "call" }),
             });
         }
@@ -308,7 +308,7 @@ fn emit_laravel_closure_command<'arena>(
         handler_fqn: "<closure>".to_string(),
         handler_path: path,
         handler_line: line,
-        source: crate::engine::EntryPointSource::StaticCall,
+        source: EntryPointSource::StaticCall,
         extra: serde_json::Value::Null,
     });
 }
@@ -510,7 +510,7 @@ fn visit_class_like_attribute_lists<'arena>(
                 handler_fqn,
                 handler_path: path,
                 handler_line: line,
-                source: crate::engine::EntryPointSource::Attribute,
+                source: EntryPointSource::Attribute,
                 extra,
             });
         }
@@ -541,7 +541,7 @@ fn detect_interface_entry_points<'arena>(
             handler_fqn: format!("{}::handle", class_fqn),
             handler_path: path.clone(),
             handler_line: line,
-            source: crate::engine::EntryPointSource::Interface,
+            source: EntryPointSource::Interface,
             extra: serde_json::Value::Null,
         });
     }
@@ -556,7 +556,7 @@ fn detect_interface_entry_points<'arena>(
             handler_fqn: format!("{}::handle", class_fqn),
             handler_path: path.clone(),
             handler_line: line,
-            source: crate::engine::EntryPointSource::Interface,
+            source: EntryPointSource::Interface,
             extra: serde_json::Value::Null,
         });
     }
@@ -574,7 +574,7 @@ fn detect_interface_entry_points<'arena>(
                     handler_fqn: format!("{}::handle", class_fqn),
                     handler_path: path.clone(),
                     handler_line: line,
-                    source: crate::engine::EntryPointSource::Interface,
+                    source: EntryPointSource::Interface,
                     extra: serde_json::json!({ "event": event_hint }),
                 });
                 break;
@@ -595,7 +595,7 @@ fn detect_interface_entry_points<'arena>(
             handler_fqn: format!("{}::execute", class_fqn),
             handler_path: path.clone(),
             handler_line: line,
-            source: crate::engine::EntryPointSource::Interface,
+            source: EntryPointSource::Interface,
             extra: serde_json::Value::Null,
         });
     }
@@ -607,7 +607,7 @@ fn detect_interface_entry_points<'arena>(
             handler_fqn: format!("{}::__invoke", class_fqn),
             handler_path: path.clone(),
             handler_line: line,
-            source: crate::engine::EntryPointSource::Interface,
+            source: EntryPointSource::Interface,
             extra: serde_json::Value::Null,
         });
     }
@@ -622,7 +622,7 @@ fn detect_interface_entry_points<'arena>(
             handler_fqn: format!("{}::getSubscribedEvents", class_fqn),
             handler_path: path.clone(),
             handler_line: line,
-            source: crate::engine::EntryPointSource::Interface,
+            source: EntryPointSource::Interface,
             extra: serde_json::Value::Null,
         });
     }
@@ -634,7 +634,7 @@ fn detect_interface_entry_points<'arena>(
             handler_fqn: format!("{}::getSchedule", class_fqn),
             handler_path: path,
             handler_line: line,
-            source: crate::engine::EntryPointSource::Interface,
+            source: EntryPointSource::Interface,
             extra: serde_json::Value::Null,
         });
     }
@@ -737,7 +737,7 @@ fn visit_method<'arena>(class_fqn: &str, m: &'arena Method<'arena>, ctx: &mut Ct
                 handler_fqn: handler_fqn.clone(),
                 handler_path: path.clone(),
                 handler_line: line,
-                source: crate::engine::EntryPointSource::Attribute,
+                source: EntryPointSource::Attribute,
                 extra,
             });
         }

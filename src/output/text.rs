@@ -4,6 +4,8 @@ use anyhow::Result;
 use serde_json::Value;
 
 use crate::output::envelope::Envelope;
+use crate::output::group_by_kind;
+use crate::util::short;
 
 /// Render an envelope as plain ASCII text for terminals. Stripped down vs.
 /// Markdown — no tables, indentation rather than headings, no code fences.
@@ -65,66 +67,8 @@ fn render_blastradius<W: Write>(w: &mut W, result: &Value) -> Result<()> {
     if affected.is_empty() {
         writeln!(w, "  no entry points affected")?;
     } else {
-        let mut by_kind: std::collections::BTreeMap<String, Vec<&Value>> = std::collections::BTreeMap::new();
-        for ep in &affected {
-            by_kind.entry(ep["kind"].as_str().unwrap_or("?").to_string()).or_default().push(ep);
-        }
-        let order = [
-            "symfony.route", "symfony.command", "symfony.message_handler",
-            "symfony.event_listener", "symfony.cron_task", "symfony.periodic_task",
-            "symfony.schedule_provider",
-            "laravel.route", "laravel.command", "laravel.job", "laravel.listener",
-            "laravel.scheduled_task",
-        ];
-        let emit_kind = |w: &mut W, kind: &str, eps: &[&Value]| -> Result<()> {
-            writeln!(w, "  {} ({}):", kind, eps.len())?;
-            for ep in eps {
-                let name = ep["name"].as_str().unwrap_or("?");
-                let handler = ep["handler"]["fqn"].as_str().unwrap_or("?");
-                let path = ep["handler"]["path"].as_str().unwrap_or("?");
-                let line = ep["handler"]["line"].as_u64().unwrap_or(0);
-                let conf = ep["min_confidence"].as_str().unwrap_or("Confirmed");
-                writeln!(w, "    - {} [{}]", name, conf)?;
-                writeln!(w, "        handler: {} ({}:{})", handler, path, line)?;
-            if let Some(extra) = ep.get("extra") {
-                if let Some(p) = extra.get("path").and_then(|v| v.as_str()) {
-                    let methods: String = extra
-                        .get("methods")
-                        .and_then(|v| v.as_array())
-                        .map(|m| m.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(","))
-                        .unwrap_or_default();
-                    if methods.is_empty() {
-                        writeln!(w, "        http: {}", p)?;
-                    } else {
-                        writeln!(w, "        http: {} {}", methods, p)?;
-                    }
-                }
-                if let Some(expr) = extra.get("expression").and_then(|v| v.as_str()) {
-                    writeln!(w, "        cron: {}", expr)?;
-                }
-                if let Some(freq) = extra.get("frequency").and_then(|v| v.as_str()) {
-                    writeln!(w, "        every: {}", freq)?;
-                }
-            }
-                let witness = ep["witness_path"].as_array().cloned().unwrap_or_default();
-                for step in &witness {
-                    let from = step["from"].as_str().unwrap_or("?");
-                    let to = step["to"].as_str().unwrap_or("?");
-                    let conf = step["confidence"].as_str().unwrap_or("?");
-                    writeln!(w, "        via {} -> {} [{}]", from, to, conf)?;
-                }
-            }
-            Ok(())
-        };
-        for kind in order {
-            if let Some(eps) = by_kind.remove(kind) {
-                emit_kind(w, kind, &eps)?;
-            }
-        }
-        let mut leftover: Vec<(String, Vec<&Value>)> = by_kind.into_iter().collect();
-        leftover.sort_by(|a, b| a.0.cmp(&b.0));
-        for (kind, eps) in leftover {
-            emit_kind(w, &kind, &eps)?;
+        for (kind, eps) in group_by_kind(&affected) {
+            emit_kind_section(w, &kind, &eps)?;
         }
     }
     writeln!(w)?;
@@ -144,20 +88,20 @@ fn render_blastradius<W: Write>(w: &mut W, result: &Value) -> Result<()> {
             } else {
                 writeln!(w, "    - {} ({}:{}-{})", fqn, path, ls, le)?;
             }
-            if let Some(affects) = c["affects"].as_array() {
-                if !affects.is_empty() {
-                    let parts: Vec<String> = affects
-                        .iter()
-                        .map(|a| {
-                            format!(
-                                "{} {}",
-                                a["kind"].as_str().unwrap_or("?"),
-                                a["name"].as_str().unwrap_or("?")
-                            )
-                        })
-                        .collect();
-                    writeln!(w, "        affects: {}", parts.join(", "))?;
-                }
+            if let Some(affects) = c["affects"].as_array()
+                && !affects.is_empty()
+            {
+                let parts: Vec<String> = affects
+                    .iter()
+                    .map(|a| {
+                        format!(
+                            "{} {}",
+                            a["kind"].as_str().unwrap_or("?"),
+                            a["name"].as_str().unwrap_or("?")
+                        )
+                    })
+                    .collect();
+                writeln!(w, "        affects: {}", parts.join(", "))?;
             }
         }
     }
@@ -182,10 +126,43 @@ fn render_list_entrypoints<W: Write>(w: &mut W, result: &Value) -> Result<()> {
     Ok(())
 }
 
-fn short(sha_or_ref: &str) -> &str {
-    if sha_or_ref.len() > 12 && sha_or_ref.chars().all(|c| c.is_ascii_hexdigit()) {
-        &sha_or_ref[..12]
-    } else {
-        sha_or_ref
+fn emit_kind_section<W: Write>(w: &mut W, kind: &str, eps: &[&Value]) -> Result<()> {
+    writeln!(w, "  {} ({}):", kind, eps.len())?;
+    for ep in eps {
+        let name = ep["name"].as_str().unwrap_or("?");
+        let handler = ep["handler"]["fqn"].as_str().unwrap_or("?");
+        let path = ep["handler"]["path"].as_str().unwrap_or("?");
+        let line = ep["handler"]["line"].as_u64().unwrap_or(0);
+        let conf = ep["min_confidence"].as_str().unwrap_or("Confirmed");
+        writeln!(w, "    - {} [{}]", name, conf)?;
+        writeln!(w, "        handler: {} ({}:{})", handler, path, line)?;
+        if let Some(extra) = ep.get("extra") {
+            if let Some(p) = extra.get("path").and_then(|v| v.as_str()) {
+                let methods: String = extra
+                    .get("methods")
+                    .and_then(|v| v.as_array())
+                    .map(|m| m.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(","))
+                    .unwrap_or_default();
+                if methods.is_empty() {
+                    writeln!(w, "        http: {}", p)?;
+                } else {
+                    writeln!(w, "        http: {} {}", methods, p)?;
+                }
+            }
+            if let Some(expr) = extra.get("expression").and_then(|v| v.as_str()) {
+                writeln!(w, "        cron: {}", expr)?;
+            }
+            if let Some(freq) = extra.get("frequency").and_then(|v| v.as_str()) {
+                writeln!(w, "        every: {}", freq)?;
+            }
+        }
+        let witness = ep["witness_path"].as_array().cloned().unwrap_or_default();
+        for step in &witness {
+            let from = step["from"].as_str().unwrap_or("?");
+            let to = step["to"].as_str().unwrap_or("?");
+            let conf = step["confidence"].as_str().unwrap_or("?");
+            writeln!(w, "        via {} -> {} [{}]", from, to, conf)?;
+        }
     }
+    Ok(())
 }

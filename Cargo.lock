@@ -1541,7 +1541,6 @@ dependencies = [
  "mago-analyzer",
  "mago-atom",
  "mago-codex",
- "mago-collector",
  "mago-database",
  "mago-names",
  "mago-php-version",
