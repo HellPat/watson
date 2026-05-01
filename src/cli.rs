@@ -35,7 +35,9 @@ pub enum PhpAnalysis {
         /// Project root containing the .git directory.
         #[arg(long, default_value = ".")]
         root: PathBuf,
-        /// Output format.
+        /// Output format. `json` is machine-readable; `md` is tuned for
+        /// pasting into PR descriptions and for AI reviewers; `text` is a
+        /// terminal-friendly summary for humans.
         #[arg(long, default_value = "json")]
         format: Format,
         /// Include unresolved call sites in output.
@@ -46,10 +48,18 @@ pub enum PhpAnalysis {
     ListEntrypoints {
         #[arg(long, default_value = ".")]
         root: PathBuf,
+        /// Output format (json|md|text).
+        #[arg(long, default_value = "json")]
+        format: Format,
     },
 }
 
-#[derive(ValueEnum, Clone, Copy, Debug)]
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
+    /// Multi-analysis envelope (machine-readable). Default.
     Json,
+    /// Markdown — for PR descriptions and AI reviewers.
+    Md,
+    /// Plain-text — for humans reading on a terminal.
+    Text,
 }

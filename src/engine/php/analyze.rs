@@ -144,23 +144,16 @@ fn discover_php(root: &Path) -> Result<Vec<PathBuf>> {
             let path = entry.path();
             let file_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
             if path.is_dir() {
-                // Skip third-party / build / tooling artefacts. .worktrees is a
-                // common git worktrees parent that can contain massive
-                // duplicate trees on real projects.
-                if matches!(
-                    file_name,
-                    ".git"
-                        | ".worktrees"
-                        | ".idea"
-                        | ".vscode"
-                        | "vendor"
-                        | "node_modules"
-                        | "var"
-                        | "target"
-                        | "tmp"
-                        | "cache"
-                        | "build"
-                ) {
+                // PHP-engine ignore list: only directories that *every* PHP
+                // project has and that never contain first-party source.
+                //   vendor       — composer-managed dependencies
+                //   var          — Symfony / Laravel runtime cache + logs
+                //   .git         — git plumbing (required so we don't crawl pack files)
+                //   .worktrees   — git-attached, often holds duplicate PHP trees
+                // Other choices (IDE folders, node_modules, build/tmp/cache)
+                // belong to other ecosystems or to the user's configuration —
+                // we'll surface those via a configurable ignore list later.
+                if matches!(file_name, ".git" | ".worktrees" | "vendor" | "var") {
                     continue;
                 }
                 stack.push(path);
