@@ -2,11 +2,11 @@ use std::path::{Path, PathBuf};
 
 use mago_database::file::File;
 use mago_names::ResolvedNames;
-use mago_span::Span;
+use mago_span::{HasSpan, Span};
 use mago_syntax::ast::{
-    Argument, ArgumentList, AttributeList, Class, ClassLikeMember, Enum, Expression, Extends,
-    Identifier, Implements, Interface, Literal, Method, Namespace, NamespaceBody, Program,
-    Property, Statement, Trait,
+    Argument, ArgumentList, AttributeList, Call, Class, ClassLikeMember, ClassLikeMemberSelector,
+    Enum, Expression, Extends, Identifier, Implements, Interface, Literal, Method, Namespace,
+    NamespaceBody, Program, Property, Statement, StaticMethodCall, Trait,
 };
 
 use crate::engine::EntryPoint;
@@ -29,6 +29,16 @@ const SF_MESSAGE_HANDLER_INTERFACE_FQN: &str = "Symfony\\Component\\Messenger\\H
 const SF_EVENT_SUBSCRIBER_INTERFACE_FQN: &str = "Symfony\\Component\\EventDispatcher\\EventSubscriberInterface";
 const SF_SCHEDULE_PROVIDER_INTERFACE_FQN: &str = "Symfony\\Component\\Scheduler\\ScheduleProviderInterface";
 
+// Laravel marker interfaces / base classes.
+const LV_COMMAND_BASE_FQN: &str = "Illuminate\\Console\\Command";
+const LV_SHOULD_QUEUE_FQN: &str = "Illuminate\\Contracts\\Queue\\ShouldQueue";
+const LV_SHOULD_QUEUE_AFTER_COMMIT_FQN: &str = "Illuminate\\Contracts\\Queue\\ShouldQueueAfterCommit";
+
+// Laravel route facade FQN (resolved from `Route::get(...)` etc).
+const LV_ROUTE_FACADE_FQN: &str = "Illuminate\\Support\\Facades\\Route";
+const LV_ARTISAN_FACADE_FQN: &str = "Illuminate\\Support\\Facades\\Artisan";
+const LV_SCHEDULE_FACADE_FQN: &str = "Illuminate\\Support\\Facades\\Schedule";
+
 const KIND_ROUTE: &str = "symfony.route";
 const KIND_COMMAND: &str = "symfony.command";
 const KIND_MESSAGE_HANDLER: &str = "symfony.message_handler";
@@ -36,6 +46,18 @@ const KIND_CRON_TASK: &str = "symfony.cron_task";
 const KIND_PERIODIC_TASK: &str = "symfony.periodic_task";
 const KIND_EVENT_LISTENER: &str = "symfony.event_listener";
 const KIND_SCHEDULE_PROVIDER: &str = "symfony.schedule_provider";
+
+const KIND_LV_ROUTE: &str = "laravel.route";
+const KIND_LV_COMMAND: &str = "laravel.command";
+const KIND_LV_JOB: &str = "laravel.job";
+const KIND_LV_LISTENER: &str = "laravel.listener";
+const KIND_LV_SCHEDULED_TASK: &str = "laravel.scheduled_task";
+
+const ROUTE_HTTP_METHODS: &[&str] = &[
+    "get", "post", "put", "patch", "delete", "options", "any", "match",
+];
+const ROUTE_RESOURCE_METHODS: &[&str] = &["resource", "apiResource", "singleton", "apiSingleton"];
+const ROUTE_TERMINAL_METHODS: &[&str] = &["redirect", "permanentRedirect", "view"];
 
 pub fn extract<'arena>(
     program: &'arena Program<'arena>,
@@ -65,7 +87,295 @@ fn visit_statement<'arena>(stmt: &'arena Statement<'arena>, ctx: &mut Ctx<'_, 'a
         Statement::Interface(i) => visit_interface(i, ctx),
         Statement::Trait(t) => visit_trait(t, ctx),
         Statement::Enum(e) => visit_enum(e, ctx),
+        Statement::Expression(es) => visit_top_level_expression(es.expression, ctx),
         _ => {}
+    }
+}
+
+/// Walk a top-level expression statement looking for Laravel facade calls.
+/// Routes/console/channels typically chain method calls — we drill through
+/// the chain to find the originating static-method call.
+fn visit_top_level_expression<'arena>(expr: &'arena Expression<'arena>, ctx: &mut Ctx<'_, 'arena>) {
+    let Some(call) = leaf_static_call(expr) else { return };
+    let class_fqn = match call.class {
+        Expression::Identifier(id) => match resolve_identifier(id, ctx.resolved_names) {
+            Some(s) => s.to_string(),
+            None => return,
+        },
+        _ => return,
+    };
+    let ClassLikeMemberSelector::Identifier(method_id) = &call.method else { return };
+    let method = method_id.value;
+
+    if class_fqn == LV_ROUTE_FACADE_FQN {
+        emit_laravel_route(&class_fqn, method, &call.argument_list, call.span().start.offset, ctx);
+    } else if class_fqn == LV_SCHEDULE_FACADE_FQN {
+        emit_laravel_schedule(method, &call.argument_list, call.span().start.offset, ctx);
+    } else if class_fqn == LV_ARTISAN_FACADE_FQN && method.eq_ignore_ascii_case("command") {
+        emit_laravel_closure_command(&call.argument_list, call.span().start.offset, ctx);
+    }
+}
+
+fn leaf_static_call<'arena>(expr: &'arena Expression<'arena>) -> Option<&'arena StaticMethodCall<'arena>> {
+    // Drill through method-call chains (`Route::get(...)->name(...)->middleware(...)`)
+    // until we hit the originating `Route::get(...)` call.
+    let mut current = expr;
+    loop {
+        match current {
+            Expression::Call(call) => match call {
+                Call::StaticMethod(sm) => return Some(sm),
+                Call::Method(m) => current = m.object,
+                Call::NullSafeMethod(m) => current = m.object,
+                _ => return None,
+            },
+            _ => return None,
+        }
+    }
+}
+
+fn emit_laravel_route<'arena>(
+    facade_fqn: &str,
+    method: &str,
+    args: &'arena ArgumentList<'arena>,
+    offset: u32,
+    ctx: &mut Ctx<'_, 'arena>,
+) {
+    let _ = facade_fqn;
+    let mlow = method.to_ascii_lowercase();
+    let line = ctx.file.line_number(offset) + 1;
+    let path = ctx.abs_path.clone();
+
+    if ROUTE_HTTP_METHODS.iter().any(|h| *h == mlow.as_str()) {
+        let uri = first_positional_string(args).map(|s| s.to_string()).unwrap_or_default();
+        let handler = extract_laravel_handler(args, ctx.resolved_names)
+            .unwrap_or_else(|| "<closure>".to_string());
+        let methods = if mlow == "any" {
+            vec!["ANY".to_string()]
+        } else if mlow == "match" {
+            extract_match_methods(args).unwrap_or_else(|| vec!["GET".to_string()])
+        } else {
+            vec![mlow.to_uppercase()]
+        };
+        ctx.out.push(EntryPoint {
+            kind: KIND_LV_ROUTE.to_string(),
+            name: handler.clone(),
+            handler_fqn: handler,
+            handler_path: path,
+            handler_line: line,
+            source: crate::engine::EntryPointSource::StaticCall,
+            extra: serde_json::json!({ "path": uri, "methods": methods }),
+        });
+    } else if ROUTE_RESOURCE_METHODS.iter().any(|r| *r == method) {
+        // Resource: name + controller class. v0.2 emits a single entry per
+        // resource (not the seven sub-routes); a follow-up phase can expand.
+        let name = first_positional_string(args).map(|s| s.to_string()).unwrap_or_default();
+        let handler =
+            second_positional_class(args, ctx.resolved_names).unwrap_or_else(|| "<resource>".to_string());
+        ctx.out.push(EntryPoint {
+            kind: KIND_LV_ROUTE.to_string(),
+            name: format!("{} ({})", name, method),
+            handler_fqn: handler,
+            handler_path: path,
+            handler_line: line,
+            source: crate::engine::EntryPointSource::StaticCall,
+            extra: serde_json::json!({ "path": name, "kind": method }),
+        });
+    } else if ROUTE_TERMINAL_METHODS.iter().any(|t| *t == method) {
+        let uri = first_positional_string(args).map(|s| s.to_string()).unwrap_or_default();
+        ctx.out.push(EntryPoint {
+            kind: KIND_LV_ROUTE.to_string(),
+            name: format!("{} {}", method, uri),
+            handler_fqn: format!("<{}>", method),
+            handler_path: path,
+            handler_line: line,
+            source: crate::engine::EntryPointSource::StaticCall,
+            extra: serde_json::json!({ "path": uri, "kind": method }),
+        });
+    }
+}
+
+fn emit_laravel_schedule<'arena>(
+    method: &str,
+    args: &'arena ArgumentList<'arena>,
+    offset: u32,
+    ctx: &mut Ctx<'_, 'arena>,
+) {
+    let line = ctx.file.line_number(offset) + 1;
+    let path = ctx.abs_path.clone();
+    match method {
+        "command" => {
+            let cmd = first_positional_string(args).map(|s| s.to_string()).unwrap_or_default();
+            ctx.out.push(EntryPoint {
+                kind: KIND_LV_SCHEDULED_TASK.to_string(),
+                name: format!("command: {}", cmd),
+                handler_fqn: cmd.clone(),
+                handler_path: path,
+                handler_line: line,
+                source: crate::engine::EntryPointSource::StaticCall,
+                extra: serde_json::json!({ "kind": "command", "command": cmd }),
+            });
+        }
+        "job" => {
+            let job_class =
+                first_positional_class(args, ctx.resolved_names).unwrap_or_else(|| "<unknown>".to_string());
+            ctx.out.push(EntryPoint {
+                kind: KIND_LV_SCHEDULED_TASK.to_string(),
+                name: format!("job: {}", job_class),
+                handler_fqn: format!("{}::handle", job_class),
+                handler_path: path,
+                handler_line: line,
+                source: crate::engine::EntryPointSource::StaticCall,
+                extra: serde_json::json!({ "kind": "job", "job": job_class }),
+            });
+        }
+        "call" => {
+            ctx.out.push(EntryPoint {
+                kind: KIND_LV_SCHEDULED_TASK.to_string(),
+                name: "call: <closure>".to_string(),
+                handler_fqn: "<closure>".to_string(),
+                handler_path: path,
+                handler_line: line,
+                source: crate::engine::EntryPointSource::StaticCall,
+                extra: serde_json::json!({ "kind": "call" }),
+            });
+        }
+        _ => {}
+    }
+}
+
+fn emit_laravel_closure_command<'arena>(
+    args: &'arena ArgumentList<'arena>,
+    offset: u32,
+    ctx: &mut Ctx<'_, 'arena>,
+) {
+    let line = ctx.file.line_number(offset) + 1;
+    let path = ctx.abs_path.clone();
+    let signature = first_positional_string(args).map(|s| s.to_string()).unwrap_or_default();
+    let cmd_name = signature.split_whitespace().next().unwrap_or("").to_string();
+    ctx.out.push(EntryPoint {
+        kind: KIND_LV_COMMAND.to_string(),
+        name: cmd_name,
+        handler_fqn: "<closure>".to_string(),
+        handler_path: path,
+        handler_line: line,
+        source: crate::engine::EntryPointSource::StaticCall,
+        extra: serde_json::Value::Null,
+    });
+}
+
+fn extract_laravel_handler<'arena>(
+    args: &'arena ArgumentList<'arena>,
+    names: &ResolvedNames<'arena>,
+) -> Option<String> {
+    let mut iter = args.arguments.iter().filter(|a| matches!(a, Argument::Positional(_)));
+    let _first = iter.next();
+    let action = iter.next()?;
+    match action {
+        Argument::Positional(p) => match p.value {
+            Expression::Array(arr) => extract_array_handler(arr, names),
+            Expression::Literal(Literal::String(s)) => s.value.map(|raw| {
+                if let Some((c, m)) = raw.split_once('@') {
+                    format!("{}::{}", c, m)
+                } else {
+                    raw.to_string()
+                }
+            }),
+            Expression::Access(mago_syntax::ast::Access::ClassConstant(cca)) => {
+                resolve_class_const_access(cca, names).map(|fqn| format!("{}::__invoke", fqn))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn extract_array_handler<'arena>(
+    arr: &'arena mago_syntax::ast::Array<'arena>,
+    names: &ResolvedNames<'arena>,
+) -> Option<String> {
+    let mut elems = arr.elements.iter().filter_map(|el| match el {
+        mago_syntax::ast::ArrayElement::Value(v) => Some(v.value),
+        _ => None,
+    });
+    let class_expr = elems.next()?;
+    let method_expr = elems.next()?;
+    let class_name = match class_expr {
+        Expression::Access(mago_syntax::ast::Access::ClassConstant(cca)) => {
+            resolve_class_const_access(cca, names)?
+        }
+        Expression::Literal(Literal::String(s)) => s.value?.to_string(),
+        _ => return None,
+    };
+    let method_name = match method_expr {
+        Expression::Literal(Literal::String(s)) => s.value?.to_string(),
+        _ => return None,
+    };
+    Some(format!("{}::{}", class_name, method_name))
+}
+
+fn resolve_class_const_access<'arena>(
+    cca: &'arena mago_syntax::ast::ClassConstantAccess<'arena>,
+    names: &ResolvedNames<'arena>,
+) -> Option<String> {
+    if let Expression::Identifier(id) = cca.class {
+        return resolve_identifier(id, names).map(|s| s.to_string());
+    }
+    None
+}
+
+fn extract_match_methods<'arena>(args: &'arena ArgumentList<'arena>) -> Option<Vec<String>> {
+    let first = args.arguments.iter().find_map(|a| match a {
+        Argument::Positional(p) => Some(p.value),
+        _ => None,
+    })?;
+    if let Expression::Array(arr) = first {
+        let mut out = Vec::new();
+        for el in arr.elements.iter() {
+            if let mago_syntax::ast::ArrayElement::Value(v) = el
+                && let Some(s) = string_literal(v.value)
+            {
+                out.push(s.to_uppercase());
+            }
+        }
+        if !out.is_empty() {
+            return Some(out);
+        }
+    }
+    None
+}
+
+fn second_positional_class<'arena>(
+    args: &'arena ArgumentList<'arena>,
+    names: &ResolvedNames<'arena>,
+) -> Option<String> {
+    let mut iter = args.arguments.iter().filter(|a| matches!(a, Argument::Positional(_)));
+    iter.next();
+    let second = iter.next()?;
+    let Argument::Positional(p) = second else { return None };
+    match p.value {
+        Expression::Access(mago_syntax::ast::Access::ClassConstant(cca)) => {
+            resolve_class_const_access(cca, names)
+        }
+        Expression::Literal(Literal::String(s)) => s.value.map(|s| s.to_string()),
+        _ => None,
+    }
+}
+
+fn first_positional_class<'arena>(
+    args: &'arena ArgumentList<'arena>,
+    names: &ResolvedNames<'arena>,
+) -> Option<String> {
+    let arg = args.arguments.iter().find(|a| matches!(a, Argument::Positional(_)))?;
+    let Argument::Positional(p) = arg else { return None };
+    match p.value {
+        Expression::Instantiation(inst) => match inst.class {
+            Expression::Identifier(id) => resolve_identifier(id, names).map(|s| s.to_string()),
+            _ => None,
+        },
+        Expression::Access(mago_syntax::ast::Access::ClassConstant(cca)) => {
+            resolve_class_const_access(cca, names)
+        }
+        _ => None,
     }
 }
 
@@ -170,6 +480,59 @@ fn detect_interface_entry_points<'arena>(
     let interfaces = implements_fqns(c.implements.as_ref(), ctx.resolved_names);
     let (path, line) = locate(c.name.span, ctx);
 
+    // ---- Laravel ----
+    if parents.iter().any(|p| p == LV_COMMAND_BASE_FQN) {
+        let cmd_name = find_signature_property(&c.members)
+            .map(|sig| extract_command_name(&sig).unwrap_or(sig))
+            .unwrap_or_else(|| format!("{}::handle", class_fqn));
+        ctx.out.push(EntryPoint {
+            kind: KIND_LV_COMMAND.to_string(),
+            name: cmd_name,
+            handler_fqn: format!("{}::handle", class_fqn),
+            handler_path: path.clone(),
+            handler_line: line,
+            source: crate::engine::EntryPointSource::Interface,
+            extra: serde_json::Value::Null,
+        });
+    }
+
+    if interfaces
+        .iter()
+        .any(|i| i == LV_SHOULD_QUEUE_FQN || i == LV_SHOULD_QUEUE_AFTER_COMMIT_FQN)
+    {
+        ctx.out.push(EntryPoint {
+            kind: KIND_LV_JOB.to_string(),
+            name: format!("{}::handle", class_fqn),
+            handler_fqn: format!("{}::handle", class_fqn),
+            handler_path: path.clone(),
+            handler_line: line,
+            source: crate::engine::EntryPointSource::Interface,
+            extra: serde_json::Value::Null,
+        });
+    }
+
+    if class_fqn.starts_with("App\\Listeners\\") {
+        // Laravel auto-discovery convention. Find a `handle(EventClass)` method.
+        for member in c.members.iter() {
+            let ClassLikeMember::Method(m) = member else { continue };
+            if m.name.value.eq_ignore_ascii_case("handle") {
+                let event_hint = first_param_type_hint(m, ctx.resolved_names)
+                    .unwrap_or_else(|| "?".to_string());
+                ctx.out.push(EntryPoint {
+                    kind: KIND_LV_LISTENER.to_string(),
+                    name: format!("{}::handle", class_fqn),
+                    handler_fqn: format!("{}::handle", class_fqn),
+                    handler_path: path.clone(),
+                    handler_line: line,
+                    source: crate::engine::EntryPointSource::Interface,
+                    extra: serde_json::json!({ "event": event_hint }),
+                });
+                break;
+            }
+        }
+    }
+
+    // ---- Symfony ----
     if parents.iter().any(|p| p == SF_COMMAND_BASE_FQN) {
         // Scan for `protected static $defaultName = '...';` first; fall back
         // to handler_fqn if not found. setName() inside configure() requires
@@ -252,14 +615,26 @@ fn implements_fqns<'a, 'arena>(
 fn find_default_name_property<'arena>(
     members: &'arena mago_syntax::ast::Sequence<'arena, ClassLikeMember<'arena>>,
 ) -> Option<String> {
+    find_property_string(members, "$defaultName")
+}
+
+fn find_signature_property<'arena>(
+    members: &'arena mago_syntax::ast::Sequence<'arena, ClassLikeMember<'arena>>,
+) -> Option<String> {
+    find_property_string(members, "$signature")
+}
+
+fn find_property_string<'arena>(
+    members: &'arena mago_syntax::ast::Sequence<'arena, ClassLikeMember<'arena>>,
+    name: &str,
+) -> Option<String> {
     for member in members.iter() {
         let ClassLikeMember::Property(prop) = member else { continue };
         let Property::Plain(plain) = prop else { continue };
         for item in plain.items.iter() {
-            // PropertyItem is either Concrete (= value) or Abstract.
             let mago_syntax::ast::PropertyItem::Concrete(concrete) = item else { continue };
             let var_name = concrete.variable.name;
-            if var_name.eq_ignore_ascii_case("$defaultName")
+            if var_name.eq_ignore_ascii_case(name)
                 && let Some(s) = string_literal(concrete.value)
             {
                 return Some(s.to_string());
@@ -267,6 +642,27 @@ fn find_default_name_property<'arena>(
         }
     }
     None
+}
+
+/// Laravel's `$signature` is `'name {arg} {--option}'`. Extract just the
+/// command name (the first whitespace-delimited token).
+fn extract_command_name(signature: &str) -> Option<String> {
+    signature.split_whitespace().next().map(|s| s.to_string())
+}
+
+/// Read the type hint of a method's first parameter, resolved to FQN.
+/// Used to surface the listener's event class.
+fn first_param_type_hint<'arena>(
+    method: &'arena Method<'arena>,
+    names: &ResolvedNames<'arena>,
+) -> Option<String> {
+    let first = method.parameter_list.parameters.iter().next()?;
+    let hint = first.hint.as_ref()?;
+    use mago_syntax::ast::Hint;
+    match hint {
+        Hint::Identifier(id) => resolve_identifier(id, names).map(|s| s.to_string()),
+        _ => None,
+    }
 }
 
 fn visit_method<'arena>(class_fqn: &str, m: &'arena Method<'arena>, ctx: &mut Ctx<'_, 'arena>) {
