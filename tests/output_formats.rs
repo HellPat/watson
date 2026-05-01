@@ -35,7 +35,7 @@ fn markdown_format_has_canonical_sections() {
     let stdout = run("md");
     assert!(stdout.starts_with("# watson — php symfony"), "missing top heading: {stdout}");
     assert!(stdout.contains("## list-entrypoints"));
-    assert!(stdout.contains("**4 entry points**"));
+    assert!(stdout.contains("**8 entry points**"));
     // Routes get a Markdown table.
     assert!(stdout.contains("| kind | name | handler |"));
     // Symfony attribute kinds appear by FQN.
@@ -51,7 +51,7 @@ fn text_format_is_terminal_friendly() {
     // Header bar + label.
     assert!(stdout.contains("watson php symfony"));
     assert!(stdout.contains("[list-entrypoints]"));
-    assert!(stdout.contains("4 entry point(s):"));
+    assert!(stdout.contains("8 entry point(s):"));
     // No HTML/Markdown decoration.
     assert!(!stdout.contains("```"));
     assert!(!stdout.contains("|---|"));
@@ -99,7 +99,16 @@ fn blastradius_md_renders_witness_path() {
 
     assert!(stdout.contains("## blastradius"));
     assert!(stdout.contains("**Summary**"));
-    assert!(stdout.contains("### Affected entry points (4)"));
+    // 7 handlers reach Greeter::format directly:
+    //   GreetController::show, GreetCommand::execute, PingCommand::execute,
+    //   PingHandler::__invoke, LegacyHandler::__invoke,
+    //   CleanupTask::__invoke, AppSchedule::getSchedule
+    // (PingSubscriber's *handler* in v0.2 is getSubscribedEvents, which
+    // doesn't call Greeter::format — its onKernelRequest body does.)
+    assert!(
+        stdout.contains("### Affected entry points (7)"),
+        "expected 7 affected entry points; output:\n{stdout}"
+    );
     // Markdown code-fenced witness blocks.
     assert!(stdout.contains("Witness path:"));
     assert!(stdout.contains("```text"));

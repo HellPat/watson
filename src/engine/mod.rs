@@ -41,6 +41,26 @@ pub struct CallEdge {
     pub confidence: Confidence,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum EntryPointSource {
+    /// Detected via PHP attribute (e.g. `#[Route]`, `#[AsCommand]`).
+    Attribute,
+    /// Detected via marker interface or base class (e.g. `extends Command`,
+    /// `implements MessageHandlerInterface`, `implements ShouldQueue`).
+    Interface,
+    /// Detected via static-method-call pattern (e.g. `Route::get(...)` in
+    /// `routes/*.php`).
+    StaticCall,
+    /// Read from a framework-compiled cache (`var/cache/<env>/url_matching_routes.php`,
+    /// `bootstrap/cache/routes-v7.php`).
+    CompiledCache,
+    /// Pulled from Symfony's `bin/console debug:*` JSON output (`--use-bin-console`).
+    BinConsole,
+    /// Pulled from Laravel's `php artisan list:* --json` output (`--use-artisan`).
+    Artisan,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct EntryPoint {
     pub kind: String,
@@ -48,6 +68,7 @@ pub struct EntryPoint {
     pub handler_fqn: String,
     pub handler_path: PathBuf,
     pub handler_line: u32,
+    pub source: EntryPointSource,
     #[serde(skip_serializing_if = "serde_json::Value::is_null")]
     pub extra: serde_json::Value,
 }

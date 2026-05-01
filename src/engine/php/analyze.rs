@@ -125,6 +125,8 @@ pub fn analyze_project(root: &Path) -> Result<ProjectIndex> {
     }
     let edges = symbol_references_to_edges(&symbol_references);
 
+    entry_points = dedupe_entry_points(entry_points);
+
     // Sort entry points for deterministic output.
     entry_points.sort_by(|a, b| {
         (a.handler_path.as_path(), a.handler_line, a.kind.as_str(), a.name.as_str())
@@ -281,4 +283,37 @@ fn format_symbol_id(id: &mago_codex::symbol::SymbolIdentifier) -> String {
 
 fn tracing_warn(msg: String) {
     eprintln!("watson: {msg}");
+}
+
+/// Two detectors can fire for the same handler — e.g. a class with `#[AsCommand]`
+/// also extends `Command`. Keep the most informative one. Source priority:
+///   CompiledCache / BinConsole / Artisan  (runtime-authoritative)
+///   Attribute                              (carries literal route/command name)
+///   Interface                              (fallback to handler FQN)
+///   StaticCall                             (Laravel `Route::*` calls)
+fn dedupe_entry_points(eps: Vec<EntryPoint>) -> Vec<EntryPoint> {
+    use crate::engine::EntryPointSource as S;
+
+    let priority = |s: S| -> u8 {
+        match s {
+            S::CompiledCache | S::BinConsole | S::Artisan => 4,
+            S::Attribute => 3,
+            S::Interface => 2,
+            S::StaticCall => 1,
+        }
+    };
+
+    let mut by_handler: HashMap<(String, String), EntryPoint> = HashMap::new();
+    for ep in eps {
+        let key = (ep.kind.clone(), ep.handler_fqn.to_lowercase());
+        match by_handler.get(&key) {
+            Some(existing) if priority(existing.source) >= priority(ep.source) => {
+                // keep existing
+            }
+            _ => {
+                by_handler.insert(key, ep);
+            }
+        }
+    }
+    by_handler.into_values().collect()
 }

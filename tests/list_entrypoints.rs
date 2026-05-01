@@ -52,6 +52,7 @@ fn cli_emits_envelope_with_entry_points() {
         .collect();
 
     let expected = vec![
+        // Attribute-based
         (
             "symfony.command".to_string(),
             "app:greet".to_string(),
@@ -71,6 +72,27 @@ fn cli_emits_envelope_with_entry_points() {
             "symfony.periodic_task".to_string(),
             "App\\Schedule\\CleanupTask::__invoke".to_string(),
             "App\\Schedule\\CleanupTask::__invoke".to_string(),
+        ),
+        // Interface-based (phase-8)
+        (
+            "symfony.command".to_string(),
+            "app:ping".to_string(),
+            "App\\Command\\PingCommand::execute".to_string(),
+        ),
+        (
+            "symfony.message_handler".to_string(),
+            "App\\MessageHandler\\LegacyHandler::__invoke".to_string(),
+            "App\\MessageHandler\\LegacyHandler::__invoke".to_string(),
+        ),
+        (
+            "symfony.event_listener".to_string(),
+            "App\\EventSubscriber\\PingSubscriber::getSubscribedEvents".to_string(),
+            "App\\EventSubscriber\\PingSubscriber::getSubscribedEvents".to_string(),
+        ),
+        (
+            "symfony.schedule_provider".to_string(),
+            "App\\Schedule\\AppSchedule::getSchedule".to_string(),
+            "App\\Schedule\\AppSchedule::getSchedule".to_string(),
         ),
     ];
 
