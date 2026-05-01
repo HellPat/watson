@@ -144,7 +144,23 @@ fn discover_php(root: &Path) -> Result<Vec<PathBuf>> {
             let path = entry.path();
             let file_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
             if path.is_dir() {
-                if matches!(file_name, ".git" | "vendor" | "node_modules" | "var" | "target") {
+                // Skip third-party / build / tooling artefacts. .worktrees is a
+                // common git worktrees parent that can contain massive
+                // duplicate trees on real projects.
+                if matches!(
+                    file_name,
+                    ".git"
+                        | ".worktrees"
+                        | ".idea"
+                        | ".vscode"
+                        | "vendor"
+                        | "node_modules"
+                        | "var"
+                        | "target"
+                        | "tmp"
+                        | "cache"
+                        | "build"
+                ) {
                     continue;
                 }
                 stack.push(path);
