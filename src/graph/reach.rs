@@ -152,6 +152,6 @@ fn normalise(fqn: &str) -> String {
 }
 
 /// Look up an entry point by index — used by callers building the JSON output.
-pub fn entry_point<'a>(project: &'a ProjectIndex, idx: usize) -> Option<&'a EntryPoint> {
+pub fn entry_point(project: &ProjectIndex, idx: usize) -> Option<&EntryPoint> {
     project.entry_points.get(idx)
 }

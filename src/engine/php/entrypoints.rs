@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use mago_database::file::File;
 use mago_names::ResolvedNames;
@@ -30,9 +30,9 @@ pub fn extract<'arena>(
     program: &'arena Program<'arena>,
     resolved_names: &ResolvedNames<'arena>,
     file: &File,
-    abs_path: &PathBuf,
+    abs_path: &Path,
 ) -> Vec<EntryPoint> {
-    let mut ctx = Ctx { resolved_names, file, abs_path: abs_path.clone(), namespace: String::new(), out: Vec::new() };
+    let mut ctx = Ctx { resolved_names, file, abs_path: abs_path.to_path_buf(), namespace: String::new(), out: Vec::new() };
     for stmt in program.statements.iter() {
         visit_statement(stmt, &mut ctx);
     }
@@ -270,10 +270,10 @@ fn named_string_array_arg<'a>(args: &'a ArgumentList<'a>, key: &str) -> Option<V
     };
     let mut out = Vec::new();
     for elem in array.elements.iter() {
-        if let mago_syntax::ast::ArrayElement::Value(v) = elem {
-            if let Some(s) = string_literal(v.value) {
-                out.push(s.to_string());
-            }
+        if let mago_syntax::ast::ArrayElement::Value(v) = elem
+            && let Some(s) = string_literal(v.value)
+        {
+            out.push(s.to_string());
         }
     }
     if out.is_empty() { None } else { Some(out) }

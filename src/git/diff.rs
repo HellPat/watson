@@ -86,22 +86,21 @@ fn parse_unified(text: &str, repo: &Path) -> Result<Vec<ChangedFile>> {
             if let Some(c) = current.as_mut() {
                 c.status = ChangeStatus::Renamed;
             }
-        } else if let Some(rest) = line.strip_prefix("@@ ") {
+        } else if let Some(rest) = line.strip_prefix("@@ ")
+            && let Some((plus_part, _)) = rest.split_once(" @@")
+            && let Some(plus) = plus_part.split_whitespace().find(|t| t.starts_with('+'))
+        {
             // @@ -A,B +C,D @@ ... — we only care about the +C,D part on the new side.
             // C may be 0 for fully-deleted regions; D defaults to 1 when omitted.
-            if let Some((plus_part, _)) = rest.split_once(" @@") {
-                if let Some(plus) = plus_part.split_whitespace().find(|t| t.starts_with('+')) {
-                    let plus = plus.trim_start_matches('+');
-                    let (start_str, count_str) =
-                        plus.split_once(',').map(|(s, c)| (s, c)).unwrap_or((plus, "1"));
-                    let start: u32 = start_str.parse().unwrap_or(0);
-                    let count: u32 = count_str.parse().unwrap_or(1);
-                    if start > 0 && count > 0 {
-                        if let Some(c) = current.as_mut() {
-                            c.hunks.push(LineRange { start, end_exclusive: start + count });
-                        }
-                    }
-                }
+            let plus = plus.trim_start_matches('+');
+            let (start_str, count_str) = plus.split_once(',').unwrap_or((plus, "1"));
+            let start: u32 = start_str.parse().unwrap_or(0);
+            let count: u32 = count_str.parse().unwrap_or(1);
+            if start > 0
+                && count > 0
+                && let Some(c) = current.as_mut()
+            {
+                c.hunks.push(LineRange { start, end_exclusive: start + count });
             }
         }
     }

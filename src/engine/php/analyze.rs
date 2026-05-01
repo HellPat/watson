@@ -177,16 +177,16 @@ fn collect_symbols(
         }
 
         for (method_name, method_id) in class_meta.declaring_method_ids.iter() {
-            if let Some(method_meta) = codebase.get_method_by_id(method_id) {
-                if let Some((path, ls, le)) = locate_span(method_meta.span, files, path_by_id) {
-                    symbols.push(Symbol {
-                        fqn: format!("{}::{}", fqn.as_str(), method_name.as_str()),
-                        kind: SymbolKind::Method,
-                        path,
-                        line_start: ls,
-                        line_end: le,
-                    });
-                }
+            if let Some(method_meta) = codebase.get_method_by_id(method_id)
+                && let Some((path, ls, le)) = locate_span(method_meta.span, files, path_by_id)
+            {
+                symbols.push(Symbol {
+                    fqn: format!("{}::{}", fqn.as_str(), method_name.as_str()),
+                    kind: SymbolKind::Method,
+                    path,
+                    line_start: ls,
+                    line_end: le,
+                });
             }
         }
     }
@@ -195,16 +195,16 @@ fn collect_symbols(
         if !scope.as_str().is_empty() {
             continue;
         }
-        if fn_meta.name.is_some() {
-            if let Some((path, ls, le)) = locate_span(fn_meta.span, files, path_by_id) {
-                symbols.push(Symbol {
-                    fqn: name.as_str().to_string(),
-                    kind: SymbolKind::Function,
-                    path,
-                    line_start: ls,
-                    line_end: le,
-                });
-            }
+        if fn_meta.name.is_some()
+            && let Some((path, ls, le)) = locate_span(fn_meta.span, files, path_by_id)
+        {
+            symbols.push(Symbol {
+                fqn: name.as_str().to_string(),
+                kind: SymbolKind::Function,
+                path,
+                line_start: ls,
+                line_end: le,
+            });
         }
     }
 

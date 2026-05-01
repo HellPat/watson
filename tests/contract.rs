@@ -152,6 +152,20 @@ fn changed_engine_handler_is_self_affected() {
     assert!(affected[0].witness.is_empty());
 }
 
+#[test]
+fn engine_trait_works_for_noop_engine() {
+    // Exercise the Engine trait against the fake impl — the contract is
+    // structural, but proving NoopEngine satisfies it ensures we don't
+    // accidentally bake PHP-specific bounds into the trait.
+    let engine = NoopEngine { fixture: fab_index("/imaginary/project") };
+    let project = engine.analyze_project(std::path::Path::new("/imaginary")).unwrap();
+    assert_eq!(engine.lang_id(), "noop");
+    assert_eq!(engine.extensions(), &["noop"]);
+    assert_eq!(project.entry_points.len(), 2);
+    assert_eq!(project.symbols.len(), 4);
+    assert_eq!(project.edges.len(), 3);
+}
+
 // ---- boundary lint ---------------------------------------------------------
 
 #[test]
