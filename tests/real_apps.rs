@@ -114,7 +114,12 @@ fn smoke(repo_env: &str, default_rel: &str) {
     // Envelope-level invariants.
     assert_eq!(envelope["tool"], "watson");
     assert_eq!(envelope["language"], "php");
-    assert_eq!(envelope["framework"], "symfony");
+    let fw = envelope["framework"].as_str().unwrap_or("");
+    assert!(
+        fw == "symfony" || fw == "laravel",
+        "framework should auto-detect to symfony or laravel; got {fw:?}"
+    );
+    eprintln!("framework: {fw}");
     assert_eq!(envelope["analyses"][0]["name"], "blastradius");
     assert_eq!(envelope["analyses"][0]["ok"], true);
 
@@ -169,4 +174,10 @@ fn team_up_smoke() {
 #[ignore]
 fn project_l_smoke() {
     smoke("WATSON_PROJECT_L_ROOT", "project-l");
+}
+
+#[test]
+#[ignore]
+fn easy_plu_smoke() {
+    smoke("WATSON_EASY_PLU_ROOT", "easy-plu/backend");
 }

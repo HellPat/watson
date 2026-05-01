@@ -96,23 +96,73 @@ fn visit_statement<'arena>(stmt: &'arena Statement<'arena>, ctx: &mut Ctx<'_, 'a
 /// Routes/console/channels typically chain method calls — we drill through
 /// the chain to find the originating static-method call.
 fn visit_top_level_expression<'arena>(expr: &'arena Expression<'arena>, ctx: &mut Ctx<'_, 'arena>) {
-    let Some(call) = leaf_static_call(expr) else { return };
-    let class_fqn = match call.class {
-        Expression::Identifier(id) => match resolve_identifier(id, ctx.resolved_names) {
-            Some(s) => s.to_string(),
-            None => return,
-        },
-        _ => return,
-    };
-    let ClassLikeMemberSelector::Identifier(method_id) = &call.method else { return };
-    let method = method_id.value;
+    if let Some(call) = leaf_static_call(expr) {
+        let class_fqn_opt = match call.class {
+            Expression::Identifier(id) => resolve_identifier(id, ctx.resolved_names).map(|s| s.to_string()),
+            _ => None,
+        };
+        if let Some(class_fqn) = class_fqn_opt
+            && let ClassLikeMemberSelector::Identifier(method_id) = &call.method
+        {
+            let method = method_id.value;
+            if class_fqn == LV_ROUTE_FACADE_FQN {
+                emit_laravel_route(&class_fqn, method, &call.argument_list, call.span().start.offset, ctx);
+            } else if class_fqn == LV_SCHEDULE_FACADE_FQN {
+                emit_laravel_schedule(method, &call.argument_list, call.span().start.offset, ctx);
+            } else if class_fqn == LV_ARTISAN_FACADE_FQN && method.eq_ignore_ascii_case("command") {
+                emit_laravel_closure_command(&call.argument_list, call.span().start.offset, ctx);
+            }
+        }
+    }
+    // Recurse into closure arguments anywhere in the expression to catch
+    // nested `Route::group(function () { Route::get(...); ... })`.
+    walk_closures_in_expr(expr, ctx);
+}
 
-    if class_fqn == LV_ROUTE_FACADE_FQN {
-        emit_laravel_route(&class_fqn, method, &call.argument_list, call.span().start.offset, ctx);
-    } else if class_fqn == LV_SCHEDULE_FACADE_FQN {
-        emit_laravel_schedule(method, &call.argument_list, call.span().start.offset, ctx);
-    } else if class_fqn == LV_ARTISAN_FACADE_FQN && method.eq_ignore_ascii_case("command") {
-        emit_laravel_closure_command(&call.argument_list, call.span().start.offset, ctx);
+fn walk_closures_in_expr<'arena>(expr: &'arena Expression<'arena>, ctx: &mut Ctx<'_, 'arena>) {
+    use mago_syntax::ast::{ArrowFunction, Closure};
+
+    fn walk_args<'arena>(args: &'arena ArgumentList<'arena>, ctx: &mut Ctx<'_, 'arena>) {
+        for arg in args.arguments.iter() {
+            let value = match arg {
+                Argument::Positional(p) => p.value,
+                Argument::Named(n) => n.value,
+            };
+            walk_closures_in_expr(value, ctx);
+        }
+    }
+
+    fn walk_closure<'arena>(c: &'arena Closure<'arena>, ctx: &mut Ctx<'_, 'arena>) {
+        for stmt in c.body.statements.iter() {
+            if let Statement::Expression(es) = stmt {
+                visit_top_level_expression(es.expression, ctx);
+            }
+        }
+    }
+
+    fn walk_arrow<'arena>(af: &'arena ArrowFunction<'arena>, ctx: &mut Ctx<'_, 'arena>) {
+        visit_top_level_expression(af.expression, ctx);
+    }
+
+    match expr {
+        Expression::Closure(c) => walk_closure(c, ctx),
+        Expression::ArrowFunction(af) => walk_arrow(af, ctx),
+        Expression::Call(call) => match call {
+            Call::StaticMethod(sm) => walk_args(&sm.argument_list, ctx),
+            Call::Method(m) => {
+                walk_closures_in_expr(m.object, ctx);
+                walk_args(&m.argument_list, ctx);
+            }
+            Call::NullSafeMethod(m) => {
+                walk_closures_in_expr(m.object, ctx);
+                walk_args(&m.argument_list, ctx);
+            }
+            Call::Function(f) => {
+                walk_closures_in_expr(f.function, ctx);
+                walk_args(&f.argument_list, ctx);
+            }
+        },
+        _ => {}
     }
 }
 
