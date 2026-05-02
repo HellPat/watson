@@ -17,7 +17,7 @@ fn main() -> Result<()> {
             let spec = resolve(&args.root, &args.revisions, args.cached)?;
             let verbosity = Verbosity::from_count(args.verbose);
             let engine = PhpEngine::new();
-            let envelope = blastradius::run(&engine, &args.root, &spec, framework, verbosity)?;
+            let envelope = blastradius::run(&engine, &args.root, &spec, framework, verbosity, args.strict)?;
             output::write(args.format, io::stdout().lock(), &envelope)?;
         }
         Command::ListEntrypoints(args) => {

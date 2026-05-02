@@ -87,6 +87,7 @@ pub fn run(
     spec: &DiffSpec,
     framework: Framework,
     verbosity: Verbosity,
+    strict: bool,
 ) -> Result<Envelope> {
     let canonical_root = root
         .canonicalize()
@@ -111,15 +112,16 @@ pub fn run(
     let changed_fqns: Vec<String> = changed_symbols.iter().map(|c| c.fqn.clone()).collect();
     let mut reach = reverse_reach(&project, &changed_fqns);
 
-    // File-level fallback. mago's static analyzer can't follow interface
-    // dispatch (Laravel projects bind contracts to implementations at the
-    // container, dispatch via `$this->repo->find()` where `$repo` is an
-    // interface — invisible to a static call graph). Augment the call-graph
-    // result with: any entry point whose handler *file* is in the diff is
-    // also marked affected, with `NameOnly` confidence so consumers can
-    // filter. Strong correctness floor for projects with heavy interface
-    // DI.
-    augment_file_level_reach(&mut reach, &project, &diffs, &changed_symbols);
+    // File-level fallback (default). mago's static analyzer can't follow
+    // interface dispatch (Laravel projects bind contracts to implementations
+    // at the container, dispatch via `$this->repo->find()` where `$repo` is
+    // an interface — invisible to a static call graph). Augment the call-
+    // graph result with: any entry point whose handler *file* is in the
+    // diff is also marked affected, with `NameOnly` confidence. Pass
+    // `--strict` to drop the file-level matches entirely.
+    if !strict {
+        augment_file_level_reach(&mut reach, &project, &diffs, &changed_symbols);
+    }
 
     let affected = &reach.affected;
 
