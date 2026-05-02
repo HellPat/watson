@@ -64,6 +64,11 @@ fn cli_emits_envelope_with_entry_points() {
             "App\\Controller\\GreetController::show".to_string(),
         ),
         (
+            "symfony.route".to_string(),
+            "greet_show_legacy".to_string(),
+            "App\\Controller\\GreetController::show".to_string(),
+        ),
+        (
             "symfony.message_handler".to_string(),
             "App\\MessageHandler\\PingHandler::__invoke".to_string(),
             "App\\MessageHandler\\PingHandler::__invoke".to_string(),
@@ -93,6 +98,17 @@ fn cli_emits_envelope_with_entry_points() {
             "symfony.schedule_provider".to_string(),
             "App\\Schedule\\AppSchedule::getSchedule".to_string(),
             "App\\Schedule\\AppSchedule::getSchedule".to_string(),
+        ),
+        // PHPUnit (this iteration)
+        (
+            "phpunit.test".to_string(),
+            "App\\Tests\\Service\\GreeterTest::testFormatPrependsHello".to_string(),
+            "App\\Tests\\Service\\GreeterTest::testFormatPrependsHello".to_string(),
+        ),
+        (
+            "phpunit.test".to_string(),
+            "App\\Tests\\Service\\GreeterTest::it_handles_empty_input".to_string(),
+            "App\\Tests\\Service\\GreeterTest::it_handles_empty_input".to_string(),
         ),
     ];
 
