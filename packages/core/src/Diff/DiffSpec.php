@@ -42,13 +42,13 @@ final class DiffSpec
         if ($cached) {
             $head = self::revParse($repoPath, 'HEAD');
 
-            return new self($head, HeadKind::Index, 'HEAD', '<index>');
+            return new self($head, HeadKind::index(), 'HEAD', '<index>');
         }
 
         return match (count($revisions)) {
             0 => new self(
                 self::revParse($repoPath, 'HEAD'),
-                HeadKind::WorkingTree,
+                HeadKind::workingTree(),
                 'HEAD',
                 '<working tree>',
             ),
@@ -84,7 +84,7 @@ final class DiffSpec
         // Plain <rev>: working tree vs <rev>.
         $baseSha = self::revParse($repo, $rev);
 
-        return new self($baseSha, HeadKind::WorkingTree, $rev, '<working tree>');
+        return new self($baseSha, HeadKind::workingTree(), $rev, '<working tree>');
     }
 
     private static function resolveTwo(string $repo, string $a, string $b): self
