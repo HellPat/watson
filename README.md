@@ -87,6 +87,14 @@ Reference: <https://git-scm.com/docs/git-diff>
 | `laravel.listener` | classes under `App\Listeners\*` with a `handle(EventClass)` method (auto-discovery convention); event class FQN recorded in `extra.event` |
 | `laravel.scheduled_task` | `Schedule::command(...)` / `Schedule::job(...)` / `Schedule::call(...)` in `routes/console.php` and `app/Console/Kernel::schedule()` |
 
+##### PHPUnit
+
+| kind | source |
+| --- | --- |
+| `phpunit.test` | classes extending `PHPUnit\Framework\TestCase` (or with class-name suffix `Test`); methods whose name starts with `test*` (case-insensitive) or that carry `#[PHPUnit\Framework\Attributes\Test]` |
+
+Tests appear last in the per-kind ordering — useful for spotting performance regressions but lower signal-to-noise than user-facing entry points.
+
 ##### Known gaps
 
 - **Symfony YAML / XML / PHP-config routes parsed directly** — non-goal. Run `bin/console cache:warmup` to populate `var/cache/<env>/url_matching_routes.php` (compiled-cache loader is in progress) or pass `--use-bin-console` (planned) to shell out at run time.

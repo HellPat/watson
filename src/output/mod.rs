@@ -27,6 +27,9 @@ pub const KIND_ORDER: &[&str] = &[
     "laravel.job",
     "laravel.listener",
     "laravel.scheduled_task",
+    // Tests last — useful for catching perf regressions but lower
+    // signal-to-noise than user-facing entry points.
+    "phpunit.test",
 ];
 
 /// Group an envelope's `affected_entry_points` by `kind` in stable order:

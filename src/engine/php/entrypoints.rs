@@ -34,6 +34,13 @@ const LV_COMMAND_BASE_FQN: &str = "Illuminate\\Console\\Command";
 const LV_SHOULD_QUEUE_FQN: &str = "Illuminate\\Contracts\\Queue\\ShouldQueue";
 const LV_SHOULD_QUEUE_AFTER_COMMIT_FQN: &str = "Illuminate\\Contracts\\Queue\\ShouldQueueAfterCommit";
 
+// PHPUnit. Detected when a class extends `TestCase` directly OR when its
+// name ends with `Test` (the conventional class-name suffix). Methods are
+// entry points if their name starts with `test` (case-insensitive) OR they
+// carry `#[Test]`.
+const PHPUNIT_TESTCASE_FQN: &str = "PHPUnit\\Framework\\TestCase";
+const PHPUNIT_TEST_ATTR_FQN: &str = "PHPUnit\\Framework\\Attributes\\Test";
+
 // Laravel route facade FQN (resolved from `Route::get(...)` etc).
 const LV_ROUTE_FACADE_FQN: &str = "Illuminate\\Support\\Facades\\Route";
 const LV_ARTISAN_FACADE_FQN: &str = "Illuminate\\Support\\Facades\\Artisan";
@@ -52,6 +59,8 @@ const KIND_LV_COMMAND: &str = "laravel.command";
 const KIND_LV_JOB: &str = "laravel.job";
 const KIND_LV_LISTENER: &str = "laravel.listener";
 const KIND_LV_SCHEDULED_TASK: &str = "laravel.scheduled_task";
+
+const KIND_PHPUNIT_TEST: &str = "phpunit.test";
 
 const ROUTE_HTTP_METHODS: &[&str] = &[
     "get", "post", "put", "patch", "delete", "options", "any", "match",
@@ -632,12 +641,57 @@ fn detect_interface_entry_points<'arena>(
             kind: KIND_SCHEDULE_PROVIDER.to_string(),
             name: format!("{}::getSchedule", class_fqn),
             handler_fqn: format!("{}::getSchedule", class_fqn),
-            handler_path: path,
+            handler_path: path.clone(),
             handler_line: line,
             source: EntryPointSource::Interface,
             extra: serde_json::Value::Null,
         });
     }
+
+    // ---- PHPUnit ----
+    let class_short_name = class_fqn.rsplit('\\').next().unwrap_or(class_fqn);
+    let is_test_class = parents.iter().any(|p| p == PHPUNIT_TESTCASE_FQN)
+        || class_short_name.ends_with("Test");
+    if is_test_class {
+        for member in c.members.iter() {
+            let ClassLikeMember::Method(m) = member else { continue };
+            let mname = m.name.value;
+            let has_test_prefix = mname.len() >= 4
+                && mname[..4].eq_ignore_ascii_case("test")
+                && (mname.len() == 4 || mname.as_bytes()[4].is_ascii_uppercase());
+            let has_test_attr = method_has_attribute(m, ctx.resolved_names, PHPUNIT_TEST_ATTR_FQN);
+            if !has_test_prefix && !has_test_attr {
+                continue;
+            }
+            let (m_path, m_line) = locate(m.name.span, ctx);
+            ctx.out.push(EntryPoint {
+                kind: KIND_PHPUNIT_TEST.to_string(),
+                name: format!("{}::{}", class_fqn, mname),
+                handler_fqn: format!("{}::{}", class_fqn, mname),
+                handler_path: m_path,
+                handler_line: m_line,
+                source: if has_test_attr { EntryPointSource::Attribute } else { EntryPointSource::Interface },
+                extra: serde_json::Value::Null,
+            });
+        }
+    }
+}
+
+fn method_has_attribute<'arena>(
+    m: &'arena Method<'arena>,
+    names: &ResolvedNames<'arena>,
+    target_fqn: &str,
+) -> bool {
+    for list in m.attribute_lists.iter() {
+        for attr in list.attributes.iter() {
+            if let Some(fqn) = resolve_identifier(&attr.name, names)
+                && fqn == target_fqn
+            {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn parent_fqns<'a, 'arena>(

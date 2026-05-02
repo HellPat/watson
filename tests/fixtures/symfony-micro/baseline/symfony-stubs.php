@@ -110,6 +110,20 @@ namespace Symfony\Component\HttpKernel {
     }
 }
 
+namespace PHPUnit\Framework {
+    class TestCase
+    {
+        protected function setUp(): void {}
+        protected function assertSame(mixed $a, mixed $b): void {}
+        protected function assertNotEmpty(mixed $a): void {}
+    }
+}
+
+namespace PHPUnit\Framework\Attributes {
+    #[\Attribute(\Attribute::TARGET_METHOD)]
+    class Test {}
+}
+
 namespace Symfony\Component\Messenger\Handler {
     interface MessageHandlerInterface
     {

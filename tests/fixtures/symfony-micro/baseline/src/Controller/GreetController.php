@@ -15,6 +15,7 @@ final class GreetController
     }
 
     #[Route('/greet/{name}', name: 'greet_show', methods: ['GET'])]
+    #[Route('/hello/{name}', name: 'greet_show_legacy', methods: ['GET'])]
     public function show(string $name): Response
     {
         return new Response($this->greeter->format($name));

@@ -288,12 +288,20 @@ fn format_symbol_id(id: &mago_codex::symbol::SymbolIdentifier) -> String {
 }
 
 
-/// Two detectors can fire for the same handler — e.g. a class with `#[AsCommand]`
-/// also extends `Command`. Keep the most informative one. Source priority:
+/// Two detectors can fire for the same logical entry point — e.g. a class
+/// with `#[AsCommand]` also extends `Command`. Keep the most informative
+/// detection. Source priority:
 ///   CompiledCache / BinConsole / Artisan  (runtime-authoritative)
-///   Attribute                              (carries literal route/command name)
+///   Attribute                              (carries literal route / command name)
 ///   Interface                              (fallback to handler FQN)
 ///   StaticCall                             (Laravel `Route::*` calls)
+///
+/// IMPORTANT: dedup key is per-kind. A single controller method can carry
+/// several `#[Route]` attributes (multiple routes pointing at the same
+/// handler) — we MUST keep them as distinct entry points. The user-facing
+/// identity for a route is the HTTP method + path, for a command it is the
+/// command name. Falling back to handler_fqn here used to silently collapse
+/// every route on a multi-route handler into one. Don't.
 fn dedupe_entry_points(eps: Vec<EntryPoint>) -> Vec<EntryPoint> {
     use crate::engine::EntryPointSource as S;
 
@@ -306,17 +314,48 @@ fn dedupe_entry_points(eps: Vec<EntryPoint>) -> Vec<EntryPoint> {
         }
     };
 
-    let mut by_handler: HashMap<(String, String), EntryPoint> = HashMap::new();
+    let mut by_key: HashMap<(String, String), EntryPoint> = HashMap::new();
     for ep in eps {
-        let key = (ep.kind.clone(), ep.handler_fqn.to_lowercase());
-        match by_handler.get(&key) {
-            Some(existing) if priority(existing.source) >= priority(ep.source) => {
-                // keep existing
-            }
+        let key = (ep.kind.clone(), entry_point_dedup_key(&ep));
+        match by_key.get(&key) {
+            Some(existing) if priority(existing.source) >= priority(ep.source) => {}
             _ => {
-                by_handler.insert(key, ep);
+                by_key.insert(key, ep);
             }
         }
     }
-    by_handler.into_values().collect()
+    by_key.into_values().collect()
+}
+
+/// Per-kind identity used for dedup. The user-facing identity differs by
+/// kind:
+///   - routes are identified by HTTP method + path (one method may carry
+///     several `#[Route]` attributes — every distinct path is a separate
+///     route);
+///   - everything else (commands, jobs, message handlers, listeners,
+///     scheduled tasks, schedule providers, tests) is "one logical thing per
+///     handler" — collapse on handler FQN so that an attribute + interface
+///     double-detection on the same class merges via source priority.
+fn entry_point_dedup_key(ep: &EntryPoint) -> String {
+    match ep.kind.as_str() {
+        "symfony.route" | "laravel.route" => {
+            let path = ep.extra.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            let methods = ep
+                .extra
+                .get("methods")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    let mut ms: Vec<&str> = arr.iter().filter_map(|x| x.as_str()).collect();
+                    ms.sort_unstable();
+                    ms.join(",")
+                })
+                .unwrap_or_default();
+            if path.is_empty() && methods.is_empty() {
+                ep.handler_fqn.to_lowercase()
+            } else {
+                format!("{} {}", methods, path)
+            }
+        }
+        _ => ep.handler_fqn.to_lowercase(),
+    }
 }
