@@ -3,7 +3,7 @@ use std::io;
 use anyhow::Result;
 use clap::Parser;
 use watson::analysis::{blastradius, list_entrypoints};
-use watson::cli::{Cli, Command};
+use watson::cli::{Cli, Command, Verbosity};
 use watson::engine::php::PhpEngine;
 use watson::framework::detect_or_fail;
 use watson::git::spec::resolve;
@@ -15,8 +15,9 @@ fn main() -> Result<()> {
         Command::Blastradius(args) => {
             let framework = detect_or_fail(&args.root, args.framework)?;
             let spec = resolve(&args.root, &args.revisions, args.cached)?;
+            let verbosity = Verbosity::from_count(args.verbose);
             let engine = PhpEngine::new();
-            let envelope = blastradius::run(&engine, &args.root, &spec, framework)?;
+            let envelope = blastradius::run(&engine, &args.root, &spec, framework, verbosity)?;
             output::write(args.format, io::stdout().lock(), &envelope)?;
         }
         Command::ListEntrypoints(args) => {

@@ -56,6 +56,41 @@ pub struct BlastradiusArgs {
     /// Include unresolved call sites in output.
     #[arg(long)]
     pub include_unresolved: bool,
+
+    /// Verbosity. Default emits only the affected entry points (smallest
+    /// payload, ideal for piping into LLMs). `-v` adds the changed-symbol
+    /// list with each symbol's `affects` mapping. `-vv` adds the witness
+    /// path for every affected entry point (full call-graph trace).
+    #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
+    pub verbose: u8,
+}
+
+/// Verbosity tier derived from `-v` count. Used by `analysis::blastradius`
+/// to decide which sections to populate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Verbosity {
+    /// Default: affected entry points + summary only.
+    EntryPointsOnly,
+    /// `-v`: + per-symbol `affects` mapping.
+    WithChangedSymbols,
+    /// `-vv` (or higher): + witness path per entry point.
+    WithWitnessPaths,
+}
+
+impl Verbosity {
+    pub fn from_count(n: u8) -> Self {
+        match n {
+            0 => Verbosity::EntryPointsOnly,
+            1 => Verbosity::WithChangedSymbols,
+            _ => Verbosity::WithWitnessPaths,
+        }
+    }
+    pub fn includes_changed_symbols(self) -> bool {
+        self >= Verbosity::WithChangedSymbols
+    }
+    pub fn includes_witness_paths(self) -> bool {
+        self >= Verbosity::WithWitnessPaths
+    }
 }
 
 #[derive(Args, Debug)]

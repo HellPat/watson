@@ -1,17 +1,17 @@
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::Serialize;
 use serde_json::json;
 
-use crate::cli::Framework;
+use crate::cli::{Framework, Verbosity};
 use crate::diff::hunks::intersect_changed_symbols;
 use crate::engine::{Confidence, Engine};
 use crate::git::diff::diff;
 use crate::git::spec::{DiffSpec, assert_head_matches_working_tree};
 use crate::graph::reach::{reverse_reach, WitnessStep};
+use crate::output::envelope::{AnalysisEntry, Context as Ctx, Envelope};
 use crate::util::normalize_identifier;
-use crate::output::envelope::{AnalysisEntry, Context, Envelope};
 
 pub const NAME: &str = "blastradius";
 pub const VERSION: &str = "0.1.0";
@@ -19,7 +19,11 @@ pub const VERSION: &str = "0.1.0";
 #[derive(Debug, Serialize)]
 struct Result_ {
     summary: Summary,
-    changed_symbols: Vec<ChangedSymbolOut>,
+    /// Populated at `-v` (`Verbosity::WithChangedSymbols`) and above. At the
+    /// default verbosity the field is omitted to keep the JSON / Markdown
+    /// payload tight for LLM consumers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    changed_symbols: Option<Vec<ChangedSymbolOut>>,
     affected_entry_points: Vec<AffectedEntryPointOut>,
 }
 
@@ -56,7 +60,9 @@ struct AffectedEntryPointOut {
     handler: HandlerOut,
     #[serde(skip_serializing_if = "serde_json::Value::is_null")]
     extra: serde_json::Value,
-    witness_path: Vec<WitnessStepOut>,
+    /// Populated at `-vv` (`Verbosity::WithWitnessPaths`) only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    witness_path: Option<Vec<WitnessStepOut>>,
     min_confidence: Confidence,
 }
 
@@ -80,15 +86,18 @@ pub fn run(
     root: &Path,
     spec: &DiffSpec,
     framework: Framework,
+    verbosity: Verbosity,
 ) -> Result<Envelope> {
-    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let canonical_root = root
+        .canonicalize()
+        .with_context(|| format!("--root path does not exist or is unreadable: {}", root.display()))?;
 
     assert_head_matches_working_tree(&canonical_root, spec)?;
 
     let mut envelope = Envelope::new(
         "php",
         framework_label(framework),
-        Context {
+        Ctx {
             root: canonical_root.clone(),
             base: Some(spec.base_display.clone()),
             head: Some(spec.head_display.clone()),
@@ -111,61 +120,53 @@ pub fn run(
         .map(|(out_idx, a)| (a.entry_point_index, out_idx))
         .collect();
 
-    let result = Result_ {
-        summary: Summary {
-            files_changed: diffs.len(),
-            symbols_changed: changed_symbols.len(),
-            entry_points_affected: affected.len(),
-        },
-        changed_symbols: changed_symbols
-            .iter()
-            .map(|c| {
-                let lower = normalize_identifier(&c.fqn);
-                let affects = reach
-                    .affects_by_changed
-                    .get(&lower)
-                    .map(|eps| {
-                        eps.iter()
-                            .filter_map(|orig_idx| {
-                                let out_idx = ep_index_in_output.get(orig_idx)?;
-                                let ep = project.entry_points.get(*orig_idx)?;
-                                Some(AffectsRef {
-                                    kind: ep.kind.clone(),
-                                    name: ep.name.clone(),
-                                    ep_index: *out_idx,
-                                })
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
-                ChangedSymbolOut {
+    let summary = Summary {
+        files_changed: diffs.len(),
+        symbols_changed: changed_symbols.len(),
+        entry_points_affected: affected.len(),
+    };
+
+    let changed_symbols_out = if verbosity.includes_changed_symbols() {
+        Some(
+            changed_symbols
+                .iter()
+                .map(|c| ChangedSymbolOut {
                     fqn: c.fqn.clone(),
                     path: rel(&c.path, &canonical_root),
                     line_start: c.line_start,
                     line_end: c.line_end,
                     whole_file_gone: c.whole_file_gone,
-                    affects,
-                }
-            })
-            .collect(),
-        affected_entry_points: affected
-            .iter()
-            .filter_map(|a| {
-                project.entry_points.get(a.entry_point_index).map(|ep| AffectedEntryPointOut {
-                    kind: ep.kind.clone(),
-                    name: ep.name.clone(),
-                    handler: HandlerOut {
-                        fqn: ep.handler_fqn.clone(),
-                        path: rel(&ep.handler_path, &canonical_root),
-                        line: ep.handler_line,
-                    },
-                    extra: ep.extra.clone(),
-                    witness_path: a.witness.iter().map(witness_step_out).collect(),
-                    min_confidence: a.min_confidence,
+                    affects: collect_affects(c, &reach, &ep_index_in_output, &project),
                 })
-            })
-            .collect(),
+                .collect(),
+        )
+    } else {
+        None
     };
+
+    let affected_entry_points = affected
+        .iter()
+        .filter_map(|a| {
+            project.entry_points.get(a.entry_point_index).map(|ep| AffectedEntryPointOut {
+                kind: ep.kind.clone(),
+                name: ep.name.clone(),
+                handler: HandlerOut {
+                    fqn: ep.handler_fqn.clone(),
+                    path: rel(&ep.handler_path, &canonical_root),
+                    line: ep.handler_line,
+                },
+                extra: ep.extra.clone(),
+                witness_path: if verbosity.includes_witness_paths() {
+                    Some(a.witness.iter().map(witness_step_out).collect())
+                } else {
+                    None
+                },
+                min_confidence: a.min_confidence,
+            })
+        })
+        .collect();
+
+    let result = Result_ { summary, changed_symbols: changed_symbols_out, affected_entry_points };
 
     envelope.push(AnalysisEntry {
         name: NAME,
@@ -176,6 +177,32 @@ pub fn run(
     });
 
     Ok(envelope)
+}
+
+fn collect_affects(
+    c: &crate::diff::hunks::ChangedSymbol,
+    reach: &crate::graph::reach::ReachResult,
+    ep_index_in_output: &std::collections::HashMap<usize, usize>,
+    project: &crate::engine::ProjectIndex,
+) -> Vec<AffectsRef> {
+    let lower = normalize_identifier(&c.fqn);
+    reach
+        .affects_by_changed
+        .get(&lower)
+        .map(|eps| {
+            eps.iter()
+                .filter_map(|orig_idx| {
+                    let out_idx = ep_index_in_output.get(orig_idx)?;
+                    let ep = project.entry_points.get(*orig_idx)?;
+                    Some(AffectsRef {
+                        kind: ep.kind.clone(),
+                        name: ep.name.clone(),
+                        ep_index: *out_idx,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn witness_step_out(s: &WitnessStep) -> WitnessStepOut {
@@ -201,4 +228,3 @@ fn framework_label(framework: Framework) -> &'static str {
         Framework::Laravel => "laravel",
     }
 }
-
