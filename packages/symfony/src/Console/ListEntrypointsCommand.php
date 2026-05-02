@@ -12,7 +12,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Routing\RouterInterface;
 use Watson\Core\Output\Envelope;
 use Watson\Core\Output\Renderer;
-use Watson\Symfony\Runtime\RouteCollector;
+use Watson\Symfony\Runtime\Collector;
 
 #[AsCommand(name: 'watson:list-entrypoints', description: 'List every entry point Symfony registered.')]
 final class ListEntrypointsCommand extends Command
@@ -27,6 +27,7 @@ final class ListEntrypointsCommand extends Command
     protected function configure(): void
     {
         $this->addOption('format', null, InputOption::VALUE_REQUIRED, 'Output format (json|md|text)', 'json');
+        $this->addOption('scope', null, InputOption::VALUE_REQUIRED, 'Discovery scope (routes|all)', 'all');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -37,8 +38,14 @@ final class ListEntrypointsCommand extends Command
             rootPath: $this->projectDir,
         );
 
+        $eps = Collector::collect($this->router, $this->getApplication(), $this->projectDir, (string) $input->getOption('scope'));
+
+        if ($output->isVerbose()) {
+            $output->writeln(sprintf('<comment>watson: collected %d entry points</comment>', count($eps)));
+        }
+
         $envelope->pushAnalysis('list-entrypoints', '0.2.0-dev', [
-            'entry_points' => RouteCollector::collect($this->router),
+            'entry_points' => $eps,
         ]);
 
         $output->write(Renderer::render((string) $input->getOption('format'), $envelope));

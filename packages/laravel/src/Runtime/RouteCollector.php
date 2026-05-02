@@ -19,11 +19,11 @@ use Watson\Core\Entrypoint\Source;
 final class RouteCollector
 {
     /** @return list<EntryPoint> */
-    public static function collect(Router $router, ConsoleKernel $kernel): array
+    public static function collect(Router $router, ?ConsoleKernel $kernel = null): array
     {
         return [
             ...self::routes($router),
-            ...self::commands($kernel),
+            ...($kernel !== null ? self::commands($kernel) : []),
         ];
     }
 

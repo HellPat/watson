@@ -21,20 +21,24 @@ between mago and the user's actual Symfony / Laravel.
 
 Composer monorepo, three packages.
 
-- `watson/core`   — framework-agnostic engine. AST walking via
-                    `nikic/php-parser`, entry-point detectors that work
-                    on raw PHP source (attribute scans, marker-interface
-                    scans), git-diff plumbing, reverse-reach BFS, JSON
-                    / Markdown / Text envelope. No knowledge of
-                    Laravel or Symfony.
-- `watson/laravel`— Laravel service provider + Artisan command. Boots
-                    Laravel app, calls `Route::getRoutes()` /
-                    `Artisan::all()` for runtime-authoritative entry
-                    points, merges with core's static analysis.
-                    Auto-registered via `extra.laravel.providers`.
-- `watson/symfony`— Symfony bundle + console command. Same idea using
-                    `RouterInterface::getRouteCollection()` and the
-                    Console application.
+- `watson/core`   — framework-agnostic primitives. Multi-analysis
+                    `Envelope`, `EntryPoint` value object, `DiffSpec`
+                    (git-diff revision shapes), `GitDiff` (shells
+                    `git diff --name-only`), `FileLevelReach`
+                    (file-in-diff intersection), `ClassScanner`
+                    (filesystem PHP-class discovery), `PhpUnitCollector`,
+                    `Renderer` (json/md/text). No knowledge of Laravel
+                    or Symfony.
+- `watson/laravel`— Laravel service provider + two Artisan commands.
+                    Pulls runtime routes via `Route::getRoutes()` and
+                    commands via `Artisan::all()`. Filesystem-discovers
+                    jobs (`ShouldQueue`), listeners (`App\Listeners\*`),
+                    PHPUnit tests. Auto-registered via
+                    `extra.laravel.providers`.
+- `watson/symfony`— Symfony bundle + console commands. Routes via
+                    `RouterInterface`, commands via the running
+                    `Application` (LazyCommand-aware). Same PHPUnit
+                    discovery via shared core helper.
 
 User installs the framework adapter:
 
@@ -46,107 +50,89 @@ composer require --dev watson/symfony
 
 Auto-discovery wires up the commands; no manual config.
 
-## Packages: status
+## Status — v0.2.0-dev
 
-- [ ] `watson/core`
-  - [ ] `Engine\AstWalker` — parse a file, collect class / method nodes.
-  - [ ] `Engine\EntryPointDetector` — find Symfony/Laravel attributes,
-        marker interfaces, PHPUnit tests.
-  - [ ] `Engine\CallGraph` — build caller→callee edges via
-        `nikic/php-parser` + a simple type-of-receiver tracker. (Where
-        Rust used mago, here we either: (a) bottom-of-the-barrel name
-        resolution, or (b) optionally consume PHPStan's analysis cache
-        when available.)
-  - [ ] `Diff\GitDiff` — shell `git diff --unified=0`, parse hunks.
-  - [ ] `Diff\HunkIntersect` — overlap symbol line ranges with hunks.
-  - [ ] `Reach\ReverseBfs` — same algorithm we already shipped in Rust.
-  - [ ] `Output\Envelope` + `Output\Markdown` / `Output\Text` /
-        `Output\Json`.
-  - [ ] CLI binary `bin/watson` (delegates to either framework adapter
-        if present; falls back to source-only mode otherwise).
-- [ ] `watson/laravel`
-  - [ ] `WatsonServiceProvider`
-  - [ ] `Console\BlastradiusCommand`     (Artisan: `watson:blastradius`)
-  - [ ] `Console\ListEntrypointsCommand` (Artisan: `watson:list-entrypoints`)
-  - [ ] Pull runtime route table via `app('router')->getRoutes()`.
-  - [ ] Pull queued-listener registrations via `app('events')`.
-- [ ] `watson/symfony`
-  - [ ] `WatsonBundle`
-  - [ ] `Command\BlastradiusCommand`     (`watson:blastradius`)
-  - [ ] `Command\ListEntrypointsCommand` (`watson:list-entrypoints`)
-  - [ ] Pull runtime routes via `RouterInterface`.
-  - [ ] Pull message handlers via `messenger.routable_message_bus`.
+### Shipped
 
-## Optional PHPStan integration
+- [x] **`watson/core`** — `Envelope`, `EntryPoint`, `Source` enum,
+      `Renderer` (json/md/text with per-kind grouping), `DiffSpec`
+      (no-arg / `--cached` / `<rev>` / `<a>..<b>` / `<a>...<b>`),
+      `GitDiff`, `FileLevelReach`, `ClassScanner`, `PhpUnitCollector`,
+      `Analysis\Blastradius`. 21 PHPUnit tests covering all of the
+      above against a real tempdir git repo for `DiffSpec`.
+- [x] **`watson/laravel`** — `WatsonServiceProvider` auto-registers
+      both commands. `RouteCollector` (routes + commands runtime),
+      `JobCollector`, `ListenerCollector`, `Collector` facade with
+      `--scope=routes|all` flag.
+- [x] **`watson/symfony`** — `WatsonBundle`, `WatsonExtension`,
+      `RouteCollector` (routes + commands via `Application::all()`,
+      unwrapping `LazyCommand`), `Collector` facade.
+- [x] **Behat** — 6 hermetic scenarios across both fixtures. One
+      `@smoke`-tagged scenario runs against
+      `WATSON_EASY_PLU_ROOT=...` for opt-in real-app validation.
+- [x] **Verbosity tier** — `-v` flag emits a one-line stderr summary
+      of entry-point counts on both adapters.
+- [x] **Markdown / text output** — per-kind sections in stable order
+      (`symfony.route` → `symfony.command` → `laravel.route` → …),
+      route handlers + HTTP method/path inline.
+- [x] **Hermetic fixtures** — Laravel 11 micro-app (`bootstrap/app.php`
+      + `routes/web.php` + a controller / command / job / listener /
+      PHPUnit test), Symfony 7 micro-kernel (`MicroKernelTrait` +
+      attribute routes + a fixture command).
 
-PHPStan would help the `watson/core` call-graph step in two ways:
+### Deferred to v0.3
 
-1. **Type inference** — replace our hand-rolled receiver-type tracker
-   with PHPStan's `Scope`/`Type` system to resolve
-   `$this->repo->find()` when the property has a type hint or generic
-   constraint.
+- AST static fallback (`nikic/php-parser` based detector) for projects
+  whose kernel can't boot — useful for CI against detached
+  worktrees. Runtime registries cover the high-value case.
+- PHPStan-driven type-aware reach. Opt-in flag, kicks in only when the
+  user already has `phpstan/phpstan` in `require-dev`.
+- Symfony messenger handlers / event subscribers via container
+  introspection.
+- Laravel scheduled tasks via `Schedule::events()` runtime call.
+- Two-commit diffs where head-side ≠ HEAD/working-tree (current build
+  errors fast; future build uses `git worktree add` into a tempdir).
+- Mailables / Notifications / Broadcast channels.
+- `bin/watson` standalone CLI for projects without a framework
+  adapter.
+
+## Optional PHPStan integration (v0.3)
+
+PHPStan would help the `watson/core` reach pass in two ways:
+
+1. **Type inference** — replace file-level reach with method-level
+   reach by resolving `$this->repo->find()` to a concrete handler via
+   PHPStan's `Scope`/`Type` system.
 2. **Reflection** — `PHPStan\Reflection\ReflectionProvider` is a
    battle-tested, version-aware reflection layer; better than booting
    `ReflectionClass` and hoping autoloaders work.
 
 Plan: if `phpstan/phpstan` is in the user's `require-dev`, watson
-opportunistically enriches the call graph with PHPStan's type info.
-Otherwise core uses a simpler tracker that handles typed properties
-and promoted-constructor args directly. Keeps watson installable
-without forcing PHPStan as a hard dep.
+opportunistically enriches reach with PHPStan's type info. Otherwise
+fall back to file-level reach. Keeps watson installable without
+forcing PHPStan as a hard dep.
 
-## Tests: Behat
+## Drop Rust
 
-Behat is the de-facto Cucumber/BDD tool for PHP. Layout:
-
-```
-features/
-  blastradius.feature          # Gherkin scenarios
-  list-entrypoints.feature
-  bootstrap/
-    FeatureContext.php          # step definitions
-fixtures/
-  laravel-app/                  # minimal real Laravel app, kernel-bootable
-  symfony-app/                  # minimal real Symfony app
-```
-
-Each scenario:
-
-```gherkin
-Feature: Blastradius reports affected Laravel routes
-  Scenario: Service edit fans out to all routes that use it
-    Given the Laravel fixture at "fixtures/laravel-app"
-    And I edit "app/Services/Pinger.php"
-    When I run `php artisan watson:blastradius main..HEAD`
-    Then the JSON output should report 4 affected entry points
-    And every entry point should have kind "laravel.route"
-```
-
-`vendor/bin/behat` runs it. Same harness covers both framework
-adapters because the step definitions delegate to the framework's
-`artisan` / `bin/console` binary.
-
-PHPUnit covers `watson/core` unit tests.
-
-## Drop Rust?
-
-Yes. The Rust tree is preserved at `legacy-rust/` for reference. Once
-the PHP packages reach feature parity (entry-point catalog, file-level
-reach, multi-route dedup, verbosity tiers), `legacy-rust/` gets moved
-to a `rust-archive` git tag and deleted from `main`.
+Done. `legacy-rust/` deleted from `main` after the PHP rewrite reached
+parity. The original Rust source survives at the `rust-archive` git
+tag for historical reference.
 
 Git plumbing stays in PHP — `Symfony\Component\Process` for shelling
 `git`, plus a tiny diff-parser on top. The Rust `gix`/`git2` story
 gave us nothing the shell-out doesn't.
 
-## CLI surface (unchanged from the Rust build)
+## CLI surface
 
 ```
-watson blastradius [<rev>[..<rev2>|...<rev2>]] [-v|-vv] [--strict]
-                   [--cached] [--root <path>] [--format json|md|text]
-watson list-entrypoints [--root <path>] [--format json|md|text]
+# Laravel
+php artisan watson:blastradius     [<rev>[..<rev2>|...<rev2>]] [--cached] [--scope=routes|all] [--format json|md|text]
+php artisan watson:list-entrypoints                                       [--scope=routes|all] [--format json|md|text]
+
+# Symfony
+php bin/console watson:blastradius     [<rev>[..<rev2>|...<rev2>]] [--cached] [--scope=routes|all] [--format json|md|text]
+php bin/console watson:list-entrypoints                                       [--scope=routes|all] [--format json|md|text]
 ```
 
 Same `git diff` revision shapes (`..`, `...`, `--cached`, no-arg). Same
-verbosity tiers. Same multi-analysis envelope shape. The user's CLI
-muscle memory carries over.
+multi-analysis envelope shape across both adapters.

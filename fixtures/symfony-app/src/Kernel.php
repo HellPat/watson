@@ -63,6 +63,13 @@ final class Kernel extends BaseKernel
             ->autoconfigure()
             ->arg('$projectDir', '%kernel.project_dir%')
             ->tag('console.command');
+
+        // Fixture user-side command — proves watson picks up app:ping in
+        // its list-entrypoints output via Application::all().
+        $container->services()
+            ->set(\App\Command\PingCommand::class)
+            ->autoconfigure()
+            ->tag('console.command');
     }
 
     protected function configureRoutes(RoutingConfigurator $routes): void

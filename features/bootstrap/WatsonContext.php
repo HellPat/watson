@@ -37,26 +37,40 @@ final class WatsonContext implements Context
         $this->fixturePath = __DIR__ . '/../../fixtures/symfony-app';
     }
 
+    #[Given('the easy-plu Laravel app at WATSON_EASY_PLU_ROOT')]
+    public function easyPluApp(): void
+    {
+        $root = getenv('WATSON_EASY_PLU_ROOT');
+        if (!is_string($root) || $root === '' || !is_dir($root)) {
+            throw new \RuntimeException('WATSON_EASY_PLU_ROOT not set or path missing');
+        }
+        $this->fixturePath = $root;
+    }
+
     #[When('/^I run "([^"]+)" via artisan$/')]
     public function runArtisan(string $command): void
     {
         // -d display_errors=stderr keeps PHP's own deprecation notices out
         // of stdout so the watson JSON is the only thing on the channel.
-        $process = new Process(
-            ['php', '-d', 'display_errors=stderr', 'artisan', $command, '--format=json'],
-            $this->fixturePath,
-        );
+        $argv = ['php', '-d', 'display_errors=stderr', 'artisan', ...self::splitCommand($command), '--format=json'];
+        $process = new Process($argv, $this->fixturePath);
         $this->run($process);
     }
 
     #[When('/^I run "([^"]+)" via bin\/console$/')]
     public function runBinConsole(string $command): void
     {
-        $process = new Process(
-            ['php', '-d', 'display_errors=stderr', 'bin/console', $command, '--format=json'],
-            $this->fixturePath,
-        );
+        $argv = ['php', '-d', 'display_errors=stderr', 'bin/console', ...self::splitCommand($command), '--format=json'];
+        $process = new Process($argv, $this->fixturePath);
         $this->run($process);
+    }
+
+    /** @return list<string> */
+    private static function splitCommand(string $command): array
+    {
+        $parts = preg_split('/\s+/', trim($command));
+
+        return $parts === false ? [$command] : array_values(array_filter($parts, static fn ($p) => $p !== ''));
     }
 
     private function run(Process $process): void
@@ -99,6 +113,19 @@ final class WatsonContext implements Context
                 ));
             }
         }
+    }
+
+    #[Then('the JSON output contains entry points of kind :kind')]
+    public function jsonContainsKind(string $kind): void
+    {
+        $envelope = $this->parseEnvelope();
+        $eps = $envelope['analyses'][0]['result']['entry_points'] ?? [];
+        foreach ($eps as $ep) {
+            if (($ep['kind'] ?? null) === $kind) {
+                return;
+            }
+        }
+        throw new \RuntimeException(sprintf('no entry points of kind=%s in output', $kind));
     }
 
     #[Then('every :kind entry point should be tagged source = :expected')]
@@ -180,8 +207,11 @@ final class WatsonContext implements Context
     #[When('/^I run "([^"]+)" against the working-tree diff via artisan$/')]
     public function runArtisanBlastradius(string $command): void
     {
+        // --scope=routes keeps the assertion meaningful when the watson
+        // repo and fixture share the same git tree: a wider scope would
+        // pull in the package files themselves into the affected set.
         $process = new Process(
-            ['php', '-d', 'display_errors=stderr', 'artisan', $command, $this->baseSha, '--format=json'],
+            ['php', '-d', 'display_errors=stderr', 'artisan', $command, $this->baseSha, '--format=json', '--scope=routes'],
             $this->fixturePath,
         );
         $this->run($process);
@@ -191,7 +221,7 @@ final class WatsonContext implements Context
     public function runBinConsoleBlastradius(string $command): void
     {
         $process = new Process(
-            ['php', '-d', 'display_errors=stderr', 'bin/console', $command, $this->baseSha, '--format=json'],
+            ['php', '-d', 'display_errors=stderr', 'bin/console', $command, $this->baseSha, '--format=json', '--scope=routes'],
             $this->fixturePath,
         );
         $this->run($process);

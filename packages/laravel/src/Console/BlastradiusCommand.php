@@ -11,7 +11,7 @@ use Watson\Core\Analysis\Blastradius;
 use Watson\Core\Diff\DiffSpec;
 use Watson\Core\Output\Envelope;
 use Watson\Core\Output\Renderer;
-use Watson\Laravel\Runtime\RouteCollector;
+use Watson\Laravel\Runtime\Collector;
 
 /**
  * `php artisan watson:blastradius [revision-spec]`. Resolves a `git diff`
@@ -31,7 +31,8 @@ final class BlastradiusCommand extends Command
     protected $signature = 'watson:blastradius
         {revisions?* : git diff revision spec(s) — `<a>..<b>`, `<a>...<b>`, or two args}
         {--cached : compare the staged index against HEAD instead of the working tree}
-        {--format=json : Output format (json|md|text)}';
+        {--format=json : Output format (json|md|text)}
+        {--scope=all : Discovery scope (routes|all)}';
 
     protected $description = 'Report entry points whose handler files are in the diff.';
 
@@ -50,11 +51,22 @@ final class BlastradiusCommand extends Command
             head: $spec->headDisplay,
         );
 
+        $eps = Collector::collect($router, $consoleKernel, $repoPath, (string) $this->option('scope'));
+
+        if ($this->getOutput()->isVerbose()) {
+            $this->getOutput()->writeln(sprintf(
+                '<comment>watson: %d entry points · diff %s..%s</comment>',
+                count($eps),
+                $spec->baseDisplay,
+                $spec->headDisplay,
+            ));
+        }
+
         Blastradius::run(
             $envelope,
             $repoPath,
             $spec,
-            RouteCollector::collect($router, $consoleKernel),
+            $eps,
         );
 
         $this->output->write(Renderer::render($this->option('format'), $envelope));

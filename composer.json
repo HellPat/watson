@@ -23,7 +23,8 @@
     },
     "autoload-dev": {
         "psr-4": {
-            "Watson\\Tests\\Behat\\": "features/bootstrap/"
+            "Watson\\Tests\\Behat\\": "features/bootstrap/",
+            "Watson\\Core\\Tests\\": "packages/core/tests/"
         }
     },
     "scripts": {
