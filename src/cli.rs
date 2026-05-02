@@ -63,6 +63,12 @@ pub struct BlastradiusArgs {
     /// path for every affected entry point (full call-graph trace).
     #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
     pub verbose: u8,
+
+    /// Drop file-level matches; keep only entries that mago's call graph
+    /// could verify (`min_confidence != NameOnly`). Trades recall for
+    /// precision. Useful when interface-DI noise is overwhelming.
+    #[arg(long)]
+    pub strict: bool,
 }
 
 /// Verbosity tier derived from `-v` count. Used by `analysis::blastradius`
