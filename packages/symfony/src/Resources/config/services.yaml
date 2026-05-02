@@ -1,0 +1,12 @@
+services:
+    _defaults:
+        autowire: true
+        autoconfigure: true
+
+    Watson\Symfony\Console\ListEntrypointsCommand:
+        tags:
+            - { name: 'console.command' }
+
+    Watson\Symfony\Console\BlastradiusCommand:
+        tags:
+            - { name: 'console.command' }

@@ -1,0 +1,13 @@
+default:
+    autoload:
+        '': '%paths.base%/features/bootstrap'
+    suites:
+        watson:
+            paths: [ '%paths.base%/features' ]
+            contexts:
+                - 'Watson\Tests\Behat\WatsonContext'
+    gherkin:
+        # Smoke scenarios run against a real local checkout (e.g. easy-plu).
+        # Tagged @smoke and excluded by default — opt in with `--tags=smoke`.
+        filters:
+            tags: '~@smoke'

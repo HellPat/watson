@@ -1,1 +1,18 @@
 /target
+/vendor
+/legacy-rust/target
+
+# composer
+composer.lock
+
+# fixture runtime artefacts (not part of the test surface)
+fixtures/*/vendor/
+fixtures/*/composer.lock
+fixtures/laravel-app/bootstrap/cache/*.php
+fixtures/laravel-app/storage/logs/*.log
+fixtures/laravel-app/storage/framework/cache/data/
+fixtures/laravel-app/storage/framework/sessions/
+fixtures/laravel-app/storage/framework/views/
+fixtures/symfony-app/var/
+
+.phpunit.result.cache

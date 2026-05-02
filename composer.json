@@ -1,0 +1,40 @@
+{
+    "name": "watson/dev",
+    "description": "Workspace root — pulls watson/core + the framework adapters via local path repos.",
+    "type": "project",
+    "license": "MIT",
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "repositories": [
+        { "type": "path", "url": "packages/core",    "options": { "symlink": true } },
+        { "type": "path", "url": "packages/laravel", "options": { "symlink": true } },
+        { "type": "path", "url": "packages/symfony", "options": { "symlink": true } }
+    ],
+    "require": {
+        "php": ">=8.2",
+        "watson/core": "@dev",
+        "watson/laravel": "@dev",
+        "watson/symfony": "@dev"
+    },
+    "require-dev": {
+        "behat/behat": "^3.14",
+        "phpunit/phpunit": "^11.0",
+        "phpstan/phpstan": "^1.12"
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Watson\\Tests\\Behat\\": "features/bootstrap/",
+            "Watson\\Core\\Tests\\": "packages/core/tests/"
+        }
+    },
+    "scripts": {
+        "behat": "behat",
+        "test":  "phpunit",
+        "stan":  "phpstan analyse"
+    },
+    "config": {
+        "allow-plugins": {
+            "composer/package-versions-deprecated": true
+        }
+    }
+}

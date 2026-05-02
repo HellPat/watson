@@ -1,0 +1,21 @@
+{
+    "name": "watson/core",
+    "description": "PR blast-radius analyser for PHP. Framework-agnostic core: AST parsing, entry-point detection, call-graph reach, JSON/Markdown/Text envelope.",
+    "type": "library",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.2",
+        "ext-json": "*",
+        "nikic/php-parser": "^5.3",
+        "symfony/process": "^6.4|^7.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.0"
+    },
+    "autoload": {
+        "psr-4": { "Watson\\Core\\": "src/" }
+    },
+    "autoload-dev": {
+        "psr-4": { "Watson\\Core\\Tests\\": "tests/" }
+    }
+}
