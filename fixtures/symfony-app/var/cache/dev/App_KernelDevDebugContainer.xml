@@ -601,6 +601,9 @@
       <argument type="service_closure" id="error_handler.error_renderer.cli"/>
       <factory class="Symfony\Bundle\FrameworkBundle\ErrorHandler\ErrorRenderer\RuntimeModeErrorRendererSelector" method="select"/>
     </service>
+    <service id="process.messenger.process_message_handler" class="Symfony\Component\Process\Messenger\RunProcessMessageHandler">
+      <tag name="messenger.message_handler" sign="true"/>
+    </service>
     <service id="console.error_listener" class="Symfony\Component\Console\EventListener\ErrorListener">
       <tag name="kernel.event_subscriber"/>
       <tag name="monolog.logger" channel="console"/>

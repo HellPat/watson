@@ -1970,6 +1970,74 @@
             "install-path": "../symfony/polyfill-php85"
         },
         {
+            "name": "symfony/process",
+            "version": "v7.4.8",
+            "version_normalized": "7.4.8.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/symfony/process.git",
+                "reference": "60f19cd3badc8de688421e21e4305eba50f8089a"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/symfony/process/zipball/60f19cd3badc8de688421e21e4305eba50f8089a",
+                "reference": "60f19cd3badc8de688421e21e4305eba50f8089a",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=8.2"
+            },
+            "time": "2026-03-24T13:12:05+00:00",
+            "type": "library",
+            "installation-source": "dist",
+            "autoload": {
+                "psr-4": {
+                    "Symfony\\Component\\Process\\": ""
+                },
+                "exclude-from-classmap": [
+                    "/Tests/"
+                ]
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Fabien Potencier",
+                    "email": "fabien@symfony.com"
+                },
+                {
+                    "name": "Symfony Community",
+                    "homepage": "https://symfony.com/contributors"
+                }
+            ],
+            "description": "Executes commands in sub-processes",
+            "homepage": "https://symfony.com",
+            "support": {
+                "source": "https://github.com/symfony/process/tree/v7.4.8"
+            },
+            "funding": [
+                {
+                    "url": "https://symfony.com/sponsor",
+                    "type": "custom"
+                },
+                {
+                    "url": "https://github.com/fabpot",
+                    "type": "github"
+                },
+                {
+                    "url": "https://github.com/nicolas-grekas",
+                    "type": "github"
+                },
+                {
+                    "url": "https://tidelift.com/funding/github/packagist/symfony/symfony",
+                    "type": "tidelift"
+                }
+            ],
+            "install-path": "../symfony/process"
+        },
+        {
             "name": "symfony/routing",
             "version": "v7.4.9",
             "version_normalized": "7.4.9.0",
@@ -2585,12 +2653,13 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/core",
-                "reference": "b283c164b11e9e0c1d15ff32b21e36928fc87fc2"
+                "reference": "99b260e4c1c7f407f5435c0eb1c22704d0985552"
             },
             "require": {
                 "ext-json": "*",
                 "nikic/php-parser": "^5.3",
-                "php": ">=8.2"
+                "php": ">=8.2",
+                "symfony/process": "^6.4|^7.0"
             },
             "require-dev": {
                 "phpunit/phpunit": "^11.0"

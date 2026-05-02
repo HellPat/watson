@@ -13,6 +13,6 @@ final class HelloController
 
     public function hello(string $name): string
     {
-        return "Hello, {$name}!";
+        return "Greetings, {$name}!";
     }
 }

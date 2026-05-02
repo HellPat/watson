@@ -3,7 +3,7 @@
         'name' => 'watson/fixture-symfony-app',
         'pretty_version' => 'dev-main',
         'version' => 'dev-main',
-        'reference' => '86147e6db42258392aee98f4e02534332c3bd1c5',
+        'reference' => 'b7c570faa7cbbd75395b6d9f3387f6f23289ec53',
         'type' => 'project',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -268,6 +268,15 @@
             'aliases' => array(),
             'dev_requirement' => false,
         ),
+        'symfony/process' => array(
+            'pretty_version' => 'v7.4.8',
+            'version' => '7.4.8.0',
+            'reference' => '60f19cd3badc8de688421e21e4305eba50f8089a',
+            'type' => 'library',
+            'install_path' => __DIR__ . '/../symfony/process',
+            'aliases' => array(),
+            'dev_requirement' => false,
+        ),
         'symfony/routing' => array(
             'pretty_version' => 'v7.4.9',
             'version' => '7.4.9.0',
@@ -340,7 +349,7 @@
         'watson/core' => array(
             'pretty_version' => 'dev-php-rewrite',
             'version' => 'dev-php-rewrite',
-            'reference' => 'b283c164b11e9e0c1d15ff32b21e36928fc87fc2',
+            'reference' => '99b260e4c1c7f407f5435c0eb1c22704d0985552',
             'type' => 'library',
             'install_path' => __DIR__ . '/../watson/core',
             'aliases' => array(),
@@ -349,7 +358,7 @@
         'watson/fixture-symfony-app' => array(
             'pretty_version' => 'dev-main',
             'version' => 'dev-main',
-            'reference' => '86147e6db42258392aee98f4e02534332c3bd1c5',
+            'reference' => 'b7c570faa7cbbd75395b6d9f3387f6f23289ec53',
             'type' => 'project',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),

@@ -3,7 +3,7 @@
         'name' => 'watson/fixture-laravel-app',
         'pretty_version' => 'dev-main',
         'version' => 'dev-main',
-        'reference' => '86147e6db42258392aee98f4e02534332c3bd1c5',
+        'reference' => 'b7c570faa7cbbd75395b6d9f3387f6f23289ec53',
         'type' => 'project',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -953,7 +953,7 @@
         'watson/core' => array(
             'pretty_version' => 'dev-php-rewrite',
             'version' => 'dev-php-rewrite',
-            'reference' => 'b283c164b11e9e0c1d15ff32b21e36928fc87fc2',
+            'reference' => '99b260e4c1c7f407f5435c0eb1c22704d0985552',
             'type' => 'library',
             'install_path' => __DIR__ . '/../watson/core',
             'aliases' => array(),
@@ -962,7 +962,7 @@
         'watson/fixture-laravel-app' => array(
             'pretty_version' => 'dev-main',
             'version' => 'dev-main',
-            'reference' => '86147e6db42258392aee98f4e02534332c3bd1c5',
+            'reference' => 'b7c570faa7cbbd75395b6d9f3387f6f23289ec53',
             'type' => 'project',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),
