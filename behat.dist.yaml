@@ -1,0 +1,8 @@
+default:
+    autoload:
+        '': '%paths.base%/features/bootstrap'
+    suites:
+        list_entrypoints:
+            paths: [ '%paths.base%/features' ]
+            contexts:
+                - 'Watson\Tests\Behat\WatsonContext'
