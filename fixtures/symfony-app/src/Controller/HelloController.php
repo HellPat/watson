@@ -18,6 +18,6 @@ final class HelloController
     #[Route('/hello/{name}', name: 'hello', methods: ['GET'])]
     public function hello(string $name): Response
     {
-        return new Response("Hello, {$name}!");
+        return new Response("Greetings, {$name}!");
     }
 }
