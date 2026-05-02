@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Watson\Laravel;
 
 use Illuminate\Support\ServiceProvider;
+use Watson\Laravel\Console\BlastradiusCommand;
 use Watson\Laravel\Console\ListEntrypointsCommand;
 
 /**
@@ -19,6 +20,7 @@ final class WatsonServiceProvider extends ServiceProvider
         if ($this->app->runningInConsole()) {
             $this->commands([
                 ListEntrypointsCommand::class,
+                BlastradiusCommand::class,
             ]);
         }
     }

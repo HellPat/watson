@@ -6,3 +6,7 @@ services:
     Watson\Symfony\Console\ListEntrypointsCommand:
         tags:
             - { name: 'console.command' }
+
+    Watson\Symfony\Console\BlastradiusCommand:
+        tags:
+            - { name: 'console.command' }
