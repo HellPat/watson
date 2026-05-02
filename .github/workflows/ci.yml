@@ -1,0 +1,48 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ['8.2', '8.3', '8.4']
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          tools: composer:v2
+
+      - name: Cache composer
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.composer/cache
+            vendor
+            fixtures/laravel-app/vendor
+            fixtures/symfony-app/vendor
+          key: composer-${{ matrix.php }}-${{ hashFiles('**/composer.json') }}
+          restore-keys: composer-${{ matrix.php }}-
+
+      - name: Install workspace
+        run: composer install --no-interaction --no-progress
+
+      - name: Install Laravel fixture
+        run: composer install -d fixtures/laravel-app --no-interaction --no-progress
+
+      - name: Install Symfony fixture
+        run: composer install -d fixtures/symfony-app --no-interaction --no-progress
+
+      - name: PHPUnit
+        run: vendor/bin/phpunit --no-coverage
+
+      - name: Behat
+        run: vendor/bin/behat --no-colors

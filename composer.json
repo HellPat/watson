@@ -30,7 +30,11 @@
     "scripts": {
         "behat": "behat",
         "test":  "phpunit",
-        "stan":  "phpstan analyse"
+        "stan":  "phpstan analyse",
+        "ci":    [
+            "@test",
+            "@behat"
+        ]
     },
     "config": {
         "allow-plugins": {

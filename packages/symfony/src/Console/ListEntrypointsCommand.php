@@ -44,7 +44,7 @@ final class ListEntrypointsCommand extends Command
             $output->writeln(sprintf('<comment>watson: collected %d entry points</comment>', count($eps)));
         }
 
-        $envelope->pushAnalysis('list-entrypoints', '0.2.0-dev', [
+        $envelope->pushAnalysis('list-entrypoints', Envelope::TOOL_VERSION, [
             'entry_points' => $eps,
         ]);
 

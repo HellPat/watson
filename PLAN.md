@@ -50,7 +50,7 @@ composer require --dev watson/symfony
 
 Auto-discovery wires up the commands; no manual config.
 
-## Status — v0.2.0-dev
+## Status — v0.2.0
 
 ### Shipped
 

@@ -20,7 +20,7 @@ use Watson\Core\Reach\FileLevelReach;
 final class Blastradius
 {
     public const NAME = 'blastradius';
-    public const VERSION = '0.2.0-dev';
+    public const VERSION = '0.2.0';
 
     /**
      * @param list<EntryPoint> $entryPoints

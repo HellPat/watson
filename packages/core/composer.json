@@ -1,12 +1,20 @@
 {
     "name": "watson/core",
-    "description": "PR blast-radius analyser for PHP. Framework-agnostic core: AST parsing, entry-point detection, call-graph reach, JSON/Markdown/Text envelope.",
+    "description": "PR blast-radius analyser for PHP. Framework-agnostic core: entry-point types, git-diff plumbing, file-level reach, multi-analysis envelope (JSON/Markdown/Text).",
     "type": "library",
     "license": "MIT",
+    "keywords": ["pr", "review", "static-analysis", "diff", "blast-radius", "ai-review", "code-review"],
+    "homepage": "https://github.com/HellPat/watson",
+    "authors": [
+        { "name": "Patrick Heller", "email": "patrick.heller@khero.com" }
+    ],
+    "support": {
+        "issues": "https://github.com/HellPat/watson/issues",
+        "source": "https://github.com/HellPat/watson"
+    },
     "require": {
         "php": ">=8.2",
         "ext-json": "*",
-        "nikic/php-parser": "^5.3",
         "symfony/process": "^6.4|^7.0"
     },
     "require-dev": {
@@ -17,5 +25,10 @@
     },
     "autoload-dev": {
         "psr-4": { "Watson\\Core\\Tests\\": "tests/" }
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-main": "0.2.x-dev"
+        }
     }
 }

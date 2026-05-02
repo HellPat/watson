@@ -1,16 +1,30 @@
 {
     "name": "watson/symfony",
-    "description": "PR blast-radius analyser for Symfony. Auto-registers the `watson:blastradius` and `watson:list-entrypoints` console commands.",
+    "description": "PR blast-radius analyser for Symfony. Auto-registers `watson:blastradius` and `watson:list-entrypoints` console commands; reports which routes / commands / tests a diff reaches.",
     "type": "symfony-bundle",
     "license": "MIT",
+    "keywords": ["symfony", "pr", "review", "diff", "blast-radius", "ai-review", "code-review", "bundle"],
+    "homepage": "https://github.com/HellPat/watson",
+    "authors": [
+        { "name": "Patrick Heller", "email": "patrick.heller@khero.com" }
+    ],
+    "support": {
+        "issues": "https://github.com/HellPat/watson/issues",
+        "source": "https://github.com/HellPat/watson"
+    },
     "require": {
         "php": ">=8.2",
-        "watson/core": "@dev",
-        "symfony/framework-bundle": "^6.4|^7.0",
+        "watson/core": "^0.2",
         "symfony/console": "^6.4|^7.0",
+        "symfony/framework-bundle": "^6.4|^7.0",
         "symfony/routing": "^6.4|^7.0"
     },
     "autoload": {
         "psr-4": { "Watson\\Symfony\\": "src/" }
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-main": "0.2.x-dev"
+        }
     }
 }

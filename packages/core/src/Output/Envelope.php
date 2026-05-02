@@ -13,7 +13,7 @@ namespace Watson\Core\Output;
 final class Envelope implements \JsonSerializable
 {
     public const TOOL = 'watson';
-    public const TOOL_VERSION = '0.2.0-dev';
+    public const TOOL_VERSION = '0.2.0';
 
     /** @var list<array<string,mixed>> */
     private array $analyses = [];

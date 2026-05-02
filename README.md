@@ -1,89 +1,175 @@
 # watson
 
-PR blast-radius analyzer for PHP, shipped as a Composer dev-dep. Tells a code reviewer (human or AI) which application entry points a diff reaches — routes, console commands, queued jobs, event listeners, PHPUnit tests — so the review can focus on the surface that actually moved.
+> PR blast-radius analyzer for PHP. Drop-in Composer dev-dep. Tells your reviewer — human or AI — which routes, commands, jobs, listeners, and tests a diff actually reaches.
 
-Two adapter packages plug in via auto-discovery:
+[![ci](https://github.com/HellPat/watson/actions/workflows/ci.yml/badge.svg)](https://github.com/HellPat/watson/actions/workflows/ci.yml)
+[![packagist](https://img.shields.io/packagist/v/watson/laravel.svg?label=watson%2Flaravel)](https://packagist.org/packages/watson/laravel)
+[![packagist](https://img.shields.io/packagist/v/watson/symfony.svg?label=watson%2Fsymfony)](https://packagist.org/packages/watson/symfony)
+[![license](https://img.shields.io/github/license/HellPat/watson.svg)](LICENSE)
 
-- **`watson/laravel`** — registers `watson:list-entrypoints` and `watson:blastradius` Artisan commands.
-- **`watson/symfony`** — registers the same commands as a Bundle on `bin/console`.
+```bash
+$ php artisan watson:blastradius main..HEAD --format=md
+```
 
-Both rely on **runtime registry introspection**: Laravel's `Route::getRoutes()` / `Artisan::all()`, Symfony's `RouterInterface::getRouteCollection()` / `Application::all()`. Whatever the framework actually wired up at boot — including YAML routes, package-shipped commands, service-tag handlers — appears in the output. No AST guessing.
+```markdown
+# watson — php laravel
+_tool watson v0.2.0_
+
+Diff: `b7c570f` → `HEAD`
+Root: `/abs/path/project`
+
+## blastradius
+**Summary** — 3 files changed · 5 entry points affected
+
+### Affected entry points (5)
+
+#### laravel.route (2)
+##### users.show
+- **Handler**: `App\Http\Controllers\UserController::show` (`app/Http/Controllers/UserController.php:42`)
+- **HTTP**: GET `/users/{id}`
+…
+
+#### laravel.job (1)
+##### App\Jobs\NotifyUserJob
+- **Handler**: `App\Jobs\NotifyUserJob::handle` (`app/Jobs/NotifyUserJob.php:18`)
+```
+
+---
+
+## Why watson
+
+Code reviewers — and increasingly LLM reviewers — drown in diff context.
+A 30-line refactor inside a service can affect zero routes or fifty.
+The PR says nothing about which.
+
+watson answers in one shell: take the diff, ask the framework for its
+runtime entry-point registry, intersect, report. The output is a JSON
+envelope (or markdown / plain text) that drops straight into a PR
+description, a CI annotation, or an AI-reviewer prompt.
+
+**Runtime first, no AST guessing.** watson boots the user's actual
+`app('router')` / `RouterInterface`, walks `Artisan::all()` /
+`Application::all()`, reflects `app/Jobs` and `app/Listeners`. Whatever
+the framework wired up at boot — YAML routes, package-shipped commands,
+service-tag handlers, `Route::resource()` expansion — appears in the
+output. No version drift between watson and the framework.
+
+---
 
 ## Install
 
-```bash
-# Laravel
-composer require --dev watson/laravel
+### Laravel
 
-# Symfony
+```bash
+composer require --dev watson/laravel
+```
+
+That's it. Auto-registers via `extra.laravel.providers`. Two new Artisan commands.
+
+### Symfony
+
+```bash
 composer require --dev watson/symfony
 ```
 
-Both packages auto-register on install (Laravel via `extra.laravel.providers`, Symfony as a Bundle). Nothing to wire up.
+Auto-registers as a Bundle. Two new console commands.
+
+**Requirements:** PHP 8.2+, git on `$PATH`. Laravel 10/11/12 or Symfony 6.4/7.x. No extensions beyond `ext-json`.
+
+---
 
 ## Commands
 
-### `watson:list-entrypoints`
-
-Snapshot every entry point the framework registered.
-
-```bash
-php artisan watson:list-entrypoints                  # default scope=all (routes + commands + jobs + listeners + tests)
-php artisan watson:list-entrypoints --scope=routes   # routes only — fastest
-php artisan watson:list-entrypoints --format=md      # markdown for PR descriptions
-php bin/console watson:list-entrypoints              # Symfony equivalent
-```
-
-Output is a JSON envelope; `--format=md|text` are also available.
-
 ### `watson:blastradius`
 
-Report entry points whose handler files are touched by a diff.
+Report entry points whose handler files are touched by a diff. Revision surface mirrors `git diff` exactly.
+
+| invocation                                | meaning                              |
+| ---                                       | ---                                  |
+| `watson:blastradius`                      | working tree vs HEAD                 |
+| `watson:blastradius --cached`             | staged index vs HEAD                 |
+| `watson:blastradius <rev>`                | working tree vs `<rev>`              |
+| `watson:blastradius <a> <b>`              | `<a>` vs `<b>`                       |
+| `watson:blastradius <a>..<b>`             | same as `<a> <b>`                    |
+| `watson:blastradius <a>...<b>`            | merge-base(`<a>`,`<b>`) vs `<b>`     |
+
+Flags:
+
+| flag                  | default | meaning                                                       |
+| ---                   | ---     | ---                                                           |
+| `--format=json\|md\|text` | `json`  | output format                                                 |
+| `--scope=routes\|all` | `all`   | `routes` = cheapest; `all` adds jobs / listeners / tests      |
+| `-v`                  | —       | one-line stderr summary; stdout stays clean                   |
+
+### `watson:list-entrypoints`
+
+Snapshot every entry point the framework registered. Same `--format` and `--scope` flags.
 
 ```bash
-# git-diff-shaped revision surface
-php artisan watson:blastradius                       # working tree vs HEAD
-php artisan watson:blastradius --cached              # staged index vs HEAD
-php artisan watson:blastradius <rev>                 # working tree vs <rev>
-php artisan watson:blastradius <a> <b>               # <a> vs <b>
-php artisan watson:blastradius <a>..<b>              # same as `<a> <b>`
-php artisan watson:blastradius <a>...<b>             # merge-base(a, b) vs <b>
+$ php artisan watson:list-entrypoints --scope=all --format=text
+=====================================================================
+watson php laravel (root: /abs/path/project)
+=====================================================================
+
+[list-entrypoints]
+  9 entry point(s):
+    - laravel.route            home                           App\Http\Controllers\HelloController::home
+    - laravel.route            hello                          App\Http\Controllers\HelloController::hello
+    - laravel.command          app:ping                       App\Console\Commands\PingCommand::handle
+    - laravel.job              App\Jobs\PingJob               App\Jobs\PingJob::handle
+    - laravel.listener         App\Listeners\LogPing          App\Listeners\LogPing::handle
+    - phpunit.test             SmokeTest::testPasses          Tests\Unit\SmokeTest::testPasses
+    …
 ```
 
-Pipe `--format=md` into a PR description or an LLM-driven reviewer.
+---
 
-## What watson detects
+## Detector matrix
 
-| kind                 | source                                                                                    |
-| ---                  | ---                                                                                       |
-| `laravel.route`      | `Route::getRoutes()` runtime registry (every YAML / closure / `Route::resource()` route)  |
-| `laravel.command`    | `Artisan::all()` runtime registry, vendor commands filtered out                           |
-| `laravel.job`        | `app/Jobs/` filesystem walk for classes implementing `Illuminate\Contracts\Queue\ShouldQueue` |
-| `laravel.listener`   | `app/Listeners/` filesystem walk for classes with `handle()` or `__invoke`                |
-| `symfony.route`      | `RouterInterface::getRouteCollection()` (covers attribute / YAML / XML / PHP-config routes) |
-| `symfony.command`    | `Application::all()`, vendor commands filtered out                                        |
-| `phpunit.test`       | `tests/` filesystem walk for `PHPUnit\Framework\TestCase` subclasses                      |
+| kind                 | source (runtime / static)                                                                                       | notes                                              |
+| ---                  | ---                                                                                                             | ---                                                |
+| `laravel.route`      | `app('router')->getRoutes()`                                                                                    | covers attribute / closure / `Route::resource()`   |
+| `laravel.command`    | `Artisan::all()` (vendor commands filtered)                                                                     | handler = `handle()`                               |
+| `laravel.job`        | filesystem walk `app/Jobs/` for `Illuminate\Contracts\Queue\ShouldQueue`                                        | handler = `handle()`                               |
+| `laravel.listener`   | filesystem walk `app/Listeners/` for `handle()` or `__invoke`                                                   | matches Laravel auto-discovery convention          |
+| `symfony.route`      | `RouterInterface::getRouteCollection()`                                                                         | covers attribute / YAML / XML / PHP-config         |
+| `symfony.command`    | `Application::all()`, `LazyCommand` unwrapped, vendor filtered                                                  | handler = `execute()`                              |
+| `phpunit.test`       | filesystem walk `tests/` for `PHPUnit\Framework\TestCase` subclasses                                            | matches `test*` methods or `#[Test]` attribute     |
 
-## Output shape
+### Deferred to v0.3
 
-JSON envelope mirrors the multi-analysis schema downstream tooling expects:
+Symfony messenger handlers / event subscribers, Laravel scheduled
+tasks, Mailables / Notifications / Broadcast channels, AST-based
+static fallback for projects whose kernel can't boot, optional
+PHPStan-driven type-aware reach, two-commit non-HEAD diffs via `git
+worktree add`.
+
+---
+
+## Output schema
 
 ```json
 {
   "tool": "watson",
-  "version": "0.2.0-dev",
+  "version": "0.2.0",
   "language": "php",
   "framework": "laravel",
   "context": {"root": "/abs/path", "base": "main", "head": "<working tree>"},
   "analyses": [
     {
       "name": "blastradius",
-      "version": "0.2.0-dev",
+      "version": "0.2.0",
       "ok": true,
       "result": {
         "summary": {"files_changed": 1, "entry_points_affected": 2},
         "affected_entry_points": [
-          {"kind": "laravel.route", "name": "show", "handler": {...}, "extra": {...}, "min_confidence": "NameOnly"}
+          {
+            "kind": "laravel.route",
+            "name": "users.show",
+            "handler": {"fqn": "App\\Controller::show", "path": "app/Controller.php", "line": 42},
+            "extra": {"path": "/users/{id}", "methods": ["GET"]},
+            "min_confidence": "NameOnly"
+          }
         ]
       }
     }
@@ -91,52 +177,64 @@ JSON envelope mirrors the multi-analysis schema downstream tooling expects:
 }
 ```
 
-## Reach algorithm
+The envelope is **multi-analysis**: each command pushes one block onto
+`analyses[]`. Future analyses (e.g. test-impact, schedule-fanout) drop
+in without breaking consumers.
 
-watson uses **file-level reach**: an entry point is "affected" iff its handler file is in the diff. High recall, modest precision (a docblock-only edit shows up). Confidence is reported as `NameOnly` so consumers can filter accordingly. This is deliberately the only reach algorithm — production traffic showed it's the only signal that holds up against heavy interface-DI codebases (Laravel especially).
+### Reach algorithm
 
-## Verbosity
+watson uses **file-level reach**: an entry point is "affected" iff its
+handler file appears in the diff. High recall, modest precision (a
+docblock-only edit shows up). Confidence is reported as `NameOnly` so
+consumers can filter accordingly. Production traffic on Laravel
+codebases with heavy interface-DI showed file-level is the only signal
+that holds up; method-level call-graph reach is deferred to a future
+release behind an opt-in PHPStan flag.
 
-Both commands honour the standard Symfony Console `-v` flag:
+---
+
+## Recipes
 
 ```bash
-php artisan watson:blastradius main..HEAD -v
-# stderr: watson: 184 entry points · diff main..HEAD
+# Pre-push gut check
+php artisan watson:blastradius
+
+# Staged-only review brief
+php bin/console watson:blastradius --cached --format=md | pbcopy
+
+# PR-style merge-base diff (matches GitHub's "Files changed" view)
+php artisan watson:blastradius origin/main...HEAD --format=md
+
+# Pipe into an LLM reviewer
+php artisan watson:blastradius main..HEAD --format=md | llm \
+  --system "Review this PR. Focus on the affected entry points."
+
+# Tight CI loop — routes only, no filesystem walk
+php artisan watson:blastradius --scope=routes --format=json
 ```
 
-JSON / markdown output stays clean on stdout regardless.
-
-## Scope
-
-`--scope=routes` keeps the run cheap — no filesystem walks, no reflection on app/Jobs / app/Listeners / tests. Right for tight CI loops. `--scope=all` (default) walks the conventional directories and adds jobs / listeners / PHPUnit tests on top.
+---
 
 ## Repository layout
 
 ```
 watson/
 ├── packages/
-│   ├── core/              # framework-neutral primitives (Envelope, EntryPoint, DiffSpec, FileLevelReach, ClassScanner, PhpUnitCollector)
-│   ├── laravel/           # Artisan commands + RouteCollector / JobCollector / ListenerCollector + ServiceProvider
-│   └── symfony/           # Console commands + RouteCollector + Bundle
+│   ├── core/              # framework-neutral primitives
+│   ├── laravel/           # Artisan commands + collectors + ServiceProvider
+│   └── symfony/           # console commands + collectors + Bundle
 ├── fixtures/
-│   ├── laravel-app/       # Hermetic Laravel 11 app — Behat scenarios run against this
-│   └── symfony-app/       # Hermetic Symfony 7 micro-kernel
+│   ├── laravel-app/       # hermetic Laravel 11 app
+│   └── symfony-app/       # hermetic Symfony 7 micro-kernel
 ├── features/              # Behat scenarios + step definitions
-├── composer.json          # workspace root with path repos + autoload-dev
-└── phpunit.xml.dist       # core unit tests
+├── packages/core/tests/   # PHPUnit unit tests
+└── .github/workflows/     # CI
 ```
 
-## Dev workflow
+See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup and the recipe for adding a new detector. See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
-```bash
-composer install                            # workspace + adapters via path repos
-vendor/bin/phpunit                          # 21 unit tests on core
-vendor/bin/behat                            # 6 hermetic scenarios across both fixtures
+---
 
-# Optional smoke against a real Laravel app
-WATSON_EASY_PLU_ROOT=~/easy-plu/backend vendor/bin/behat --tags=smoke
-```
+## License
 
-## Status
-
-**v0.2.0-dev** — usable. PHP composer rewrite of the Rust v0.1 prototype. Runtime registries cover the high-value 80% of real-world entry points; static AST fallback is deferred to v0.3. PHPStan-driven type-aware reach lives behind a future opt-in flag. See `PLAN.md` for the roadmap.
+MIT. See [LICENSE](LICENSE).
