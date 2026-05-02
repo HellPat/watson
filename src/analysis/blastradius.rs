@@ -109,7 +109,18 @@ pub fn run(
     let changed_symbols = intersect_changed_symbols(&project, &diffs);
 
     let changed_fqns: Vec<String> = changed_symbols.iter().map(|c| c.fqn.clone()).collect();
-    let reach = reverse_reach(&project, &changed_fqns);
+    let mut reach = reverse_reach(&project, &changed_fqns);
+
+    // File-level fallback. mago's static analyzer can't follow interface
+    // dispatch (Laravel projects bind contracts to implementations at the
+    // container, dispatch via `$this->repo->find()` where `$repo` is an
+    // interface — invisible to a static call graph). Augment the call-graph
+    // result with: any entry point whose handler *file* is in the diff is
+    // also marked affected, with `NameOnly` confidence so consumers can
+    // filter. Strong correctness floor for projects with heavy interface
+    // DI.
+    augment_file_level_reach(&mut reach, &project, &diffs, &changed_symbols);
+
     let affected = &reach.affected;
 
     // Map source ep_index -> position in the (possibly truncated/sorted)
@@ -177,6 +188,66 @@ pub fn run(
     });
 
     Ok(envelope)
+}
+
+/// File-level augmentation. For every entry point whose handler file is in
+/// the diff, ensure it appears in `reach.affected`. If reach already added
+/// it via the call-graph path, leave the existing higher-confidence record
+/// alone. Otherwise add it with an empty witness and `NameOnly`.
+fn augment_file_level_reach(
+    reach: &mut crate::graph::reach::ReachResult,
+    project: &crate::engine::ProjectIndex,
+    diffs: &[crate::git::diff::ChangedFile],
+    changed_symbols: &[crate::diff::hunks::ChangedSymbol],
+) {
+    use crate::engine::Confidence;
+    use crate::graph::reach::AffectedEntryPoint;
+    use crate::util::canonicalize_or_self;
+    use std::collections::HashSet;
+
+    let changed_files: HashSet<std::path::PathBuf> =
+        diffs.iter().map(|d| canonicalize_or_self(&d.path)).collect();
+
+    let already: HashSet<usize> = reach.affected.iter().map(|a| a.entry_point_index).collect();
+
+    let mut additions: Vec<AffectedEntryPoint> = Vec::new();
+    for (idx, ep) in project.entry_points.iter().enumerate() {
+        if already.contains(&idx) {
+            continue;
+        }
+        let handler_canonical = canonicalize_or_self(&ep.handler_path);
+        if changed_files.contains(&handler_canonical) {
+            additions.push(AffectedEntryPoint {
+                entry_point_index: idx,
+                witness: Vec::new(),
+                min_confidence: Confidence::NameOnly,
+            });
+        }
+    }
+
+    // Build per-changed-symbol affects entries for the file-level matches.
+    // For each new ep, pair it with every changed symbol whose path equals
+    // the handler's file — that's the "what change touched this" link.
+    let symbol_paths: Vec<(String, std::path::PathBuf)> = changed_symbols
+        .iter()
+        .map(|c| (crate::util::normalize_identifier(&c.fqn), canonicalize_or_self(&c.path)))
+        .collect();
+    for add in &additions {
+        if let Some(ep) = project.entry_points.get(add.entry_point_index) {
+            let handler_canonical = canonicalize_or_self(&ep.handler_path);
+            for (lower_fqn, sym_path) in &symbol_paths {
+                if sym_path == &handler_canonical {
+                    let bucket = reach.affects_by_changed.entry(lower_fqn.clone()).or_default();
+                    if !bucket.contains(&add.entry_point_index) {
+                        bucket.push(add.entry_point_index);
+                    }
+                }
+            }
+        }
+    }
+
+    reach.affected.extend(additions);
+    reach.affected.sort_by_key(|a| a.entry_point_index);
 }
 
 fn collect_affects(
