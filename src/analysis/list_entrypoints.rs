@@ -1,12 +1,12 @@
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::Serialize;
 use serde_json::json;
 
 use crate::cli::Framework;
 use crate::engine::{Engine, EntryPoint};
-use crate::output::envelope::{AnalysisEntry, Context, Envelope};
+use crate::output::envelope::{AnalysisEntry, Context as Ctx, Envelope};
 
 pub const NAME: &str = "list-entrypoints";
 pub const VERSION: &str = "0.1.0";
@@ -17,7 +17,9 @@ struct Result_ {
 }
 
 pub fn run(engine: &dyn Engine, root: &Path, framework: Framework) -> Result<Envelope> {
-    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let canonical_root = root
+        .canonicalize()
+        .with_context(|| format!("--root path does not exist or is unreadable: {}", root.display()))?;
     let framework_label = match framework {
         Framework::Symfony => "symfony",
         Framework::Laravel => "laravel",
@@ -25,7 +27,7 @@ pub fn run(engine: &dyn Engine, root: &Path, framework: Framework) -> Result<Env
     let mut envelope = Envelope::new(
         "php",
         framework_label,
-        Context { root: canonical_root.clone(), base: None, head: None },
+        Ctx { root: canonical_root.clone(), base: None, head: None },
     );
 
     let project = engine.analyze_project(root)?;

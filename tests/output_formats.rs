@@ -90,7 +90,14 @@ fn blastradius_md_renders_witness_path() {
     let head_sha = capture(tmp.path(), &["rev-parse", "HEAD"]);
 
     let output = Command::new(binary())
-        .args(["blastradius", &format!("{}..{}", base_sha, head_sha), "--format", "md", "--root"])
+        .args([
+            "blastradius",
+            "-vv",
+            &format!("{}..{}", base_sha, head_sha),
+            "--format",
+            "md",
+            "--root",
+        ])
         .arg(tmp.path())
         .output()
         .expect("spawn");

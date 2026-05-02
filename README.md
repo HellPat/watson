@@ -34,8 +34,21 @@ Requires Rust 1.95+ (mago needs it). `git` is the only runtime dependency.
 Report entry points whose handlers transitively reach changed code.
 
 ```
-watson blastradius [<rev>[..<rev2>|...<rev2>]] [--cached] [--root <path>] [--format json|md|text]
+watson blastradius [<rev>[..<rev2>|...<rev2>]] [-v|-vv] [--cached] [--root <path>] [--format json|md|text]
 ```
+
+#### Verbosity (LLM-token-friendly defaults)
+
+`watson blastradius` emits **only the affected entry points + a one-line summary** by default. That's the smallest useful payload — it's what an AI reviewer needs to know "what does this PR break?". Add `-v` / `-vv` for more detail:
+
+| Flag | Default | `-v` | `-vv` |
+| --- | --- | --- | --- |
+| Summary | yes | yes | yes |
+| Affected entry points (kind, name, handler) | yes | yes | yes |
+| `changed_symbols[]` with each symbol's `affects[]` mapping | — | yes | yes |
+| `witness_path[]` (full call-graph trace per entry point) | — | — | yes |
+
+Real numbers, easy-plu Laravel 4437-file diff: default JSON ≈ **1.7 KB**, `-v` ≈ 54 KB (32× larger), `-vv` ≈ 54.6 KB.
 
 #### CLI shapes — `git diff` semantics
 
