@@ -6,8 +6,8 @@
          displayDetailsOnTestsThatTriggerWarnings="true"
          failOnWarning="true">
     <testsuites>
-        <testsuite name="watson-core">
-            <directory>packages/core/tests</directory>
+        <testsuite name="watson">
+            <directory>tests</directory>
         </testsuite>
     </testsuites>
 </phpunit>

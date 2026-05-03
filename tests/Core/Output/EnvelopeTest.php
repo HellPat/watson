@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Watson\Core\Tests\Output;
+namespace Watson\Tests\Core\Output;
 
 use PHPUnit\Framework\TestCase;
 use Watson\Core\Output\Envelope;

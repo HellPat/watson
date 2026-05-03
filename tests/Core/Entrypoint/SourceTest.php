@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Watson\Core\Tests\Entrypoint;
+namespace Watson\Tests\Core\Entrypoint;
 
 use PHPUnit\Framework\TestCase;
 use Watson\Core\Entrypoint\Source;

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Watson\Core\Tests\Reach;
+namespace Watson\Tests\Core\Reach;
 
 use PHPUnit\Framework\TestCase;
 use Watson\Core\Entrypoint\EntryPoint;

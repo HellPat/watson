@@ -1,10 +1,9 @@
 # watson
 
-> PR blast-radius analyzer for PHP. Drop-in Composer dev-dep. Tells your reviewer — human or AI — which routes, commands, jobs, listeners, and tests a diff actually reaches.
+> PR blast-radius analyzer for PHP. One Composer dev-dep. Tells your reviewer — human or AI — which routes, commands, jobs, listeners, and tests a diff actually reaches. Ships both Laravel and Symfony adapters in one package.
 
 [![ci](https://github.com/HellPat/watson/actions/workflows/ci.yml/badge.svg)](https://github.com/HellPat/watson/actions/workflows/ci.yml)
-[![packagist](https://img.shields.io/packagist/v/watson/laravel.svg?label=watson%2Flaravel)](https://packagist.org/packages/watson/laravel)
-[![packagist](https://img.shields.io/packagist/v/watson/symfony.svg?label=watson%2Fsymfony)](https://packagist.org/packages/watson/symfony)
+[![packagist](https://img.shields.io/packagist/v/hellpat/watson.svg)](https://packagist.org/packages/hellpat/watson)
 [![license](https://img.shields.io/github/license/HellPat/watson.svg)](LICENSE)
 
 ```bash
@@ -13,7 +12,7 @@ $ php artisan watson:blastradius main..HEAD --format=md
 
 ```markdown
 # watson — php laravel
-_tool watson v0.2.0_
+_tool watson v0.3.0_
 
 Diff: `b7c570f` → `HEAD`
 Root: `/abs/path/project`
@@ -38,43 +37,40 @@ Root: `/abs/path/project`
 
 ## Why watson
 
-Code reviewers — and increasingly LLM reviewers — drown in diff context.
-A 30-line refactor inside a service can affect zero routes or fifty.
-The PR says nothing about which.
+Code reviewers — and increasingly LLM reviewers — drown in diff context. A 30-line refactor inside a service can affect zero routes or fifty. The PR says nothing about which.
 
-watson answers in one shell: take the diff, ask the framework for its
-runtime entry-point registry, intersect, report. The output is a JSON
-envelope (or markdown / plain text) that drops straight into a PR
-description, a CI annotation, or an AI-reviewer prompt.
+watson answers in one shell: take the diff, ask the framework for its runtime entry-point registry, intersect, report. The output is a JSON envelope (or markdown / plain text) that drops straight into a PR description, a CI annotation, or an AI-reviewer prompt.
 
-**Runtime first, no AST guessing.** watson boots the user's actual
-`app('router')` / `RouterInterface`, walks `Artisan::all()` /
-`Application::all()`, reflects `app/Jobs` and `app/Listeners`. Whatever
-the framework wired up at boot — YAML routes, package-shipped commands,
-service-tag handlers, `Route::resource()` expansion — appears in the
-output. No version drift between watson and the framework.
+**Runtime first, no AST guessing.** watson boots the user's actual `app('router')` / `RouterInterface`, walks `Artisan::all()` / `Application::all()`, reflects `app/Jobs` and `app/Listeners`. Whatever the framework wired up at boot — YAML routes, package-shipped commands, service-tag handlers, `Route::resource()` expansion — appears in the output. No version drift between watson and the framework.
 
 ---
 
 ## Install
 
-### Laravel
-
 ```bash
-composer require --dev watson/laravel
+composer require --dev hellpat/watson
 ```
 
-That's it. Auto-registers via `extra.laravel.providers`. Two new Artisan commands.
+That single package ships both adapters. `composer install` resolves to whatever framework is already in your project.
+
+### Laravel
+
+Nothing else. The `WatsonServiceProvider` auto-registers via `extra.laravel.providers`. Run `php artisan watson:list-entrypoints` and you're in.
 
 ### Symfony
 
-```bash
-composer require --dev watson/symfony
+Add one line to `config/bundles.php`:
+
+```php
+return [
+    // …
+    Watson\Symfony\WatsonBundle::class => ['all' => true],
+];
 ```
 
-Auto-registers as a Bundle. Two new console commands.
+Then `php bin/console watson:list-entrypoints`.
 
-**Requirements:** PHP 8.2+, git on `$PATH`. Laravel 10/11/12 or Symfony 6.4/7.x. No extensions beyond `ext-json`.
+**Requirements:** PHP 8.2+, git on `$PATH`. Laravel 10/11/12 or Symfony 6.4/7.x. No extensions beyond `ext-json`. Required runtime deps: `symfony/console`, `symfony/process`. Framework-specific deps stay in `suggest` — your project already has them.
 
 ---
 
@@ -95,11 +91,11 @@ Report entry points whose handler files are touched by a diff. Revision surface 
 
 Flags:
 
-| flag                  | default | meaning                                                       |
-| ---                   | ---     | ---                                                           |
+| flag                      | default | meaning                                                       |
+| ---                       | ---     | ---                                                           |
 | `--format=json\|md\|text` | `json`  | output format                                                 |
-| `--scope=routes\|all` | `all`   | `routes` = cheapest; `all` adds jobs / listeners / tests      |
-| `-v`                  | —       | one-line stderr summary; stdout stays clean                   |
+| `--scope=routes\|all`     | `all`   | `routes` = cheapest; `all` adds jobs / listeners / tests      |
+| `-v`                      | —       | one-line stderr summary; stdout stays clean                   |
 
 ### `watson:list-entrypoints`
 
@@ -136,13 +132,9 @@ watson php laravel (root: /abs/path/project)
 | `symfony.command`    | `Application::all()`, `LazyCommand` unwrapped, vendor filtered                                                  | handler = `execute()`                              |
 | `phpunit.test`       | filesystem walk `tests/` for `PHPUnit\Framework\TestCase` subclasses                                            | matches `test*` methods or `#[Test]` attribute     |
 
-### Deferred to v0.3
+### Deferred to v0.4
 
-Symfony messenger handlers / event subscribers, Laravel scheduled
-tasks, Mailables / Notifications / Broadcast channels, AST-based
-static fallback for projects whose kernel can't boot, optional
-PHPStan-driven type-aware reach, two-commit non-HEAD diffs via `git
-worktree add`.
+Symfony messenger handlers / event subscribers, Laravel scheduled tasks, Mailables / Notifications / Broadcast channels, AST-based static fallback for projects whose kernel can't boot, optional PHPStan-driven type-aware reach, two-commit non-HEAD diffs via `git worktree add`.
 
 ---
 
@@ -151,14 +143,14 @@ worktree add`.
 ```json
 {
   "tool": "watson",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "language": "php",
   "framework": "laravel",
   "context": {"root": "/abs/path", "base": "main", "head": "<working tree>"},
   "analyses": [
     {
       "name": "blastradius",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "ok": true,
       "result": {
         "summary": {"files_changed": 1, "entry_points_affected": 2},
@@ -177,19 +169,11 @@ worktree add`.
 }
 ```
 
-The envelope is **multi-analysis**: each command pushes one block onto
-`analyses[]`. Future analyses (e.g. test-impact, schedule-fanout) drop
-in without breaking consumers.
+The envelope is **multi-analysis**: each command pushes one block onto `analyses[]`. Future analyses (e.g. test-impact, schedule-fanout) drop in without breaking consumers.
 
 ### Reach algorithm
 
-watson uses **file-level reach**: an entry point is "affected" iff its
-handler file appears in the diff. High recall, modest precision (a
-docblock-only edit shows up). Confidence is reported as `NameOnly` so
-consumers can filter accordingly. Production traffic on Laravel
-codebases with heavy interface-DI showed file-level is the only signal
-that holds up; method-level call-graph reach is deferred to a future
-release behind an opt-in PHPStan flag.
+watson uses **file-level reach**: an entry point is "affected" iff its handler file appears in the diff. High recall, modest precision (a docblock-only edit shows up). Confidence is reported as `NameOnly` so consumers can filter accordingly. Production traffic on Laravel codebases with heavy interface-DI showed file-level is the only signal that holds up; method-level call-graph reach is deferred to a future release behind an opt-in PHPStan flag.
 
 ---
 
@@ -219,15 +203,15 @@ php artisan watson:blastradius --scope=routes --format=json
 
 ```
 watson/
-├── packages/
-│   ├── core/              # framework-neutral primitives
-│   ├── laravel/           # Artisan commands + collectors + ServiceProvider
-│   └── symfony/           # console commands + collectors + Bundle
+├── src/
+│   ├── Core/              # framework-neutral primitives
+│   ├── Laravel/           # Artisan commands + collectors + ServiceProvider
+│   └── Symfony/           # console commands + collectors + Bundle
+├── tests/                 # PHPUnit unit tests
+├── features/              # Behat scenarios + step definitions
 ├── fixtures/
 │   ├── laravel-app/       # hermetic Laravel 11 app
 │   └── symfony-app/       # hermetic Symfony 7 micro-kernel
-├── features/              # Behat scenarios + step definitions
-├── packages/core/tests/   # PHPUnit unit tests
 └── .github/workflows/     # CI
 ```
 
