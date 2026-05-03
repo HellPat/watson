@@ -70,7 +70,7 @@ return [
 
 Then `php bin/console watson:list-entrypoints`.
 
-**Requirements:** PHP 8.2+, git on `$PATH`. Laravel 10/11/12 or Symfony 6.4/7.x. No extensions beyond `ext-json`. Required runtime deps: `symfony/console`, `symfony/process`. Framework-specific deps stay in `suggest` — your project already has them.
+**Requirements:** PHP 8.4+, git on `$PATH`. Laravel 10/11/12 or Symfony 6.4/7.x. No extensions beyond `ext-json`. Required runtime deps: `symfony/console`, `symfony/process`. Framework-specific deps stay in `suggest` — your project already has them.
 
 ---
 
@@ -80,14 +80,16 @@ Then `php bin/console watson:list-entrypoints`.
 
 Report entry points whose handler files are touched by a diff. Revision surface mirrors `git diff` exactly.
 
-| invocation                                | meaning                              |
-| ---                                       | ---                                  |
-| `watson:blastradius`                      | working tree vs HEAD                 |
-| `watson:blastradius --cached`             | staged index vs HEAD                 |
-| `watson:blastradius <rev>`                | working tree vs `<rev>`              |
-| `watson:blastradius <a> <b>`              | `<a>` vs `<b>`                       |
-| `watson:blastradius <a>..<b>`             | same as `<a> <b>`                    |
-| `watson:blastradius <a>...<b>`            | merge-base(`<a>`,`<b>`) vs `<b>`     |
+| invocation                                | meaning                              | when to use                                                                          |
+| ---                                       | ---                                  | ---                                                                                  |
+| `watson:blastradius`                      | working tree vs HEAD                 | pre-push gut check — what does the WIP touch?                                         |
+| `watson:blastradius --cached`             | staged index vs HEAD                 | pre-commit hook — gate the commit you're about to make                                |
+| `watson:blastradius <rev>`                | working tree vs `<rev>`              | "what diverges from `<rev>` right now?" Working-tree dirt included.                   |
+| `watson:blastradius <a> <b>`              | `<a>` vs `<b>`                       | compare two refs; head must equal HEAD/working-tree (file-level reach reads on disk). |
+| `watson:blastradius <a>..<b>`             | same as `<a> <b>`                    | git's range form — common in CI scripts already using `<branch>..HEAD`.               |
+| `watson:blastradius <a>...<b>`            | merge-base(`<a>`,`<b>`) vs `<b>`     | **PR review brief.** Matches GitHub's "Files changed" view exactly.                   |
+
+Pick the form that matches what you mean: `..` if you want diff between two specific commits, `...` if you want "PR-shaped" diff that ignores whatever happened on the base branch since the feature branch forked.
 
 Flags:
 
@@ -132,9 +134,25 @@ watson php laravel (root: /abs/path/project)
 | `symfony.command`    | `Application::all()`, `LazyCommand` unwrapped, vendor filtered                                                  | handler = `execute()`                              |
 | `phpunit.test`       | filesystem walk `tests/` for `PHPUnit\Framework\TestCase` subclasses                                            | matches `test*` methods or `#[Test]` attribute     |
 
+### How watson reads routes
+
+Multiple paths exist for "tell me which routes this app has." watson currently uses the first row in each framework column. The rest are noted so you understand the trade-off and what's on the roadmap.
+
+| approach                                      | needs                                            | covers                                                | speed             | trade-off                                                                                                            | watson today |
+| ---                                           | ---                                              | ---                                                   | ---               | ---                                                                                                                  | ---          |
+| **Boot kernel + `Route::getRoutes()`** (Laravel) | working `composer install`, writable `bootstrap/cache` | everything wired (attribute, closure, `Route::resource`, package providers) | ~kernel boot      | runtime authoritative; piggybacks on Artisan that's already running                                                  | ✅ default    |
+| **Boot kernel + `RouterInterface`** (Symfony)    | working `composer install` + `var/cache` writable | everything (attribute, YAML, XML, PHP-config, service-tag) | ~kernel boot      | runtime authoritative; piggybacks on the console kernel                                                              | ✅ default    |
+| **Read compiled container** (Symfony)            | `cache:warmup` ran                              | same as kernel-boot — Symfony serialises the full route map into PHP arrays | very fast (~ms)   | skip the kernel boot entirely; risk: stale cache between `cache:warmup` runs                                          | v0.4 candidate |
+| **Read compiled route cache** (Laravel)          | `php artisan route:cache` ran                   | every cached route                                     | very fast         | same speed/staleness story; many teams don't run `route:cache` outside production                                     | v0.4 candidate |
+| **Shell `bin/console debug:router --format=json`** | working install + `.env`                       | runtime authoritative                                 | slow (2 PHP procs)| no in-process API needed; useful when watson can't be installed as a dep                                              | not used     |
+| **Shell `php artisan route:list --json`**        | same                                             | runtime authoritative                                 | slow              | same                                                                                                                 | not used     |
+| **AST-only attribute scan**                      | source files                                    | only attribute-declared routes                        | very fast         | misses YAML / XML / service-tag / package-provided routes — opaque to a static reader                                | v0.4 fallback |
+
+In one line: **watson asks the framework**. Neither AST guessing nor shell-out gives the same fidelity as in-process kernel introspection, and the kernel is already running because watson lives inside the app's own console binary.
+
 ### Deferred to v0.4
 
-Symfony messenger handlers / event subscribers, Laravel scheduled tasks, Mailables / Notifications / Broadcast channels, AST-based static fallback for projects whose kernel can't boot, optional PHPStan-driven type-aware reach, two-commit non-HEAD diffs via `git worktree add`.
+Compiled-container fast path for Symfony (`var/cache/<env>/url_matching_routes.php`), compiled-route fast path for Laravel (`bootstrap/cache/routes-v7.php`), Symfony messenger handlers / event subscribers, Laravel scheduled tasks, Mailables / Notifications / Broadcast channels, AST-based static fallback for projects whose kernel can't boot, optional PHPStan-driven type-aware reach, two-commit non-HEAD diffs via `git worktree add`.
 
 ---
 
