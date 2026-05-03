@@ -2,6 +2,8 @@ services:
     _defaults:
         autowire: true
         autoconfigure: true
+        bind:
+            $projectDir: '%kernel.project_dir%'
 
     Watson\Symfony\Console\ListEntrypointsCommand:
         tags:
