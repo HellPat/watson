@@ -210,6 +210,24 @@ watson is a CLI binary, not a bundle/provider. AST scans go through [`roave/bett
 
 ---
 
+## Pipeline
+
+```mermaid
+flowchart TD
+  GD["git diff"] --> CF["changed files"]
+
+  APP["target app"] --> ASK["ask framework<br/>(debug:router, debug:container,<br/>route:list, Laravel boot)"]
+  ASK --> EP["entry points"]
+  EP --> AST["AST → handler file:line<br/>(Better Reflection)"]
+
+  CF --> X(("intersect"))
+  AST --> X
+  X --> AEP["affected entry points"]
+  AEP --> R["render<br/>text / md / json / tok"]
+```
+
+---
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
