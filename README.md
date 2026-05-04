@@ -1,6 +1,6 @@
 # watson
 
-> PR blast-radius analyzer for PHP. Standalone dev-only CLI that introspects Symfony / Laravel apps from the outside. Reports which routes, commands, jobs, listeners, and tests a diff actually reaches.
+> PR blast-radius analyzer for PHP. Standalone dev-only CLI that introspects Symfony / Laravel apps from the outside. Reports which routes, commands, jobs, message handlers, and tests a diff actually reaches.
 
 [![ci](https://github.com/HellPat/watson/actions/workflows/ci.yml/badge.svg)](https://github.com/HellPat/watson/actions/workflows/ci.yml)
 [![packagist](https://img.shields.io/packagist/v/hellpat/watson.svg)](https://packagist.org/packages/hellpat/watson)
@@ -41,13 +41,13 @@ the edge cases most likely to break, and any data shape that needs verifying."
 #    `--scope=all` includes phpunit.test entries so the LLM can cross-reference.
 git diff --name-only origin/main...HEAD | vendor/bin/watson blastradius --scope=all --format=json | llm \
   --system "The JSON contains affected entry points (routes / commands / jobs /
-listeners) AND every phpunit.test in the repo. Cross-reference: which affected
+message handlers) AND every phpunit.test in the repo. Cross-reference: which affected
 entry points have at least one test that exercises them, and which don't?
 Output a markdown table; flag gaps as 'NEEDS COVERAGE'."
 
 
 # 4. Tight CI loop — routes only, one-line summary
-#    `--scope=routes` skips the AST scans for jobs/listeners/tests.
+#    `--scope=routes` skips the messenger / jobs / tests scans.
 git diff --name-only origin/main...HEAD | vendor/bin/watson blastradius --scope=routes --format=md | llm \
   --system "Summarise which user-facing routes change in this PR. One line each."
 
@@ -56,8 +56,8 @@ git diff --name-only origin/main...HEAD | vendor/bin/watson blastradius --scope=
 #    Same input as (1), different rubric.
 git diff --name-only origin/main...HEAD | vendor/bin/watson blastradius --format=md | llm \
   --system "Rate this PR's risk (low / med / high) and explain in 3 bullets.
-Consider: blast radius across kinds, whether async paths (jobs / listeners)
-are involved, whether a test exists for every affected route."
+Consider: blast radius across kinds, whether async paths (jobs / message
+handlers) are involved, whether a test exists for every affected route."
 ```
 
 ### Post-release — observability MCP correlation
@@ -76,10 +76,10 @@ grew >20% or whose error rate doubled."
 
 
 # 2. Error / exception regression after deploy
-#    Wider scope so jobs and listeners are also checked for new exceptions.
+#    Wider scope so jobs and message handlers are also checked for new exceptions.
 git diff --name-only v1.4.0..v1.5.0 | vendor/bin/watson blastradius --format=md \
   --base=v1.4.0 --head=v1.5.0 | llm \
-  --system "These entry points (routes / commands / jobs / listeners)
+  --system "These entry points (routes / commands / jobs / message handlers)
 shipped in v1.5.0. Use Better Stack MCP error tracking to:
 - list new exception classes seen on any affected handler since deploy,
 - count occurrences vs the prior 24h,
@@ -127,7 +127,7 @@ When run in an interactive shell with no input piped and no `--files`, watson ex
 
 ### `watson list-entrypoints`
 
-Snapshot every entry point the framework registered. Same options as `blastradius`, minus the diff-input flags.
+Snapshot every entry point the framework has registered: routes, commands, message handlers, jobs (Laravel), tests. Same options as `blastradius`, minus the diff-input flags.
 
 ### `watson <cmd> --help`
 
@@ -135,8 +135,8 @@ Snapshot every entry point the framework registered. Same options as `blastradiu
 $ watson blastradius --help
 
 Description:
-  Report which routes, commands, jobs, and listeners are reached by a list
-  of changed files (read from stdin, or --files=).
+  Report which routes, commands, jobs, and message handlers are reached by
+  a list of changed files (read from stdin, or --files=).
 
 Usage:
   blastradius [options]
@@ -151,8 +151,8 @@ Options:
       --project=PROJECT  Project root (defaults to walking up from CWD)
       --format=FORMAT    text (human terminal) | md (PRs/LLMs) | json (machine)
                          | tok (token-optimized for LLM pipes) [default: "text"]
-      --scope=SCOPE      routes (cheapest) | all (+ commands / jobs / listeners
-                         / tests) [default: "all"]
+      --scope=SCOPE      routes (cheapest) | all (+ commands / jobs / message
+                         handlers / tests) [default: "all"]
       --app-env=APP-ENV  APP_ENV passed to bin/console / artisan [default: "dev"]
 ```
 
@@ -160,8 +160,8 @@ Options:
 $ watson list-entrypoints --help
 
 Description:
-  Snapshot every route, command, job, listener, and test the framework has
-  registered.
+  Snapshot every route, command, job, message handler, and test the framework
+  has registered.
 
 Usage:
   list-entrypoints [options]
@@ -170,8 +170,8 @@ Options:
       --project=PROJECT  Project root (defaults to walking up from CWD)
       --format=FORMAT    text (human terminal) | md (PRs/LLMs) | json (machine)
                          | tok (token-optimized for LLM pipes) [default: "text"]
-      --scope=SCOPE      routes (cheapest) | all (+ commands / jobs / listeners
-                         / tests) [default: "all"]
+      --scope=SCOPE      routes (cheapest) | all (+ commands / jobs / message
+                         handlers / tests) [default: "all"]
       --app-env=APP-ENV  APP_ENV passed to bin/console / artisan [default: "dev"]
 ```
 
@@ -196,15 +196,15 @@ Per-row layout: `kind \t name \t handler_fqn \t relative/path:line \t extra` (ex
 
 ## How watson reads your app
 
-| kind                | source                                                                                  |
-| ---                 | ---                                                                                     |
-| `symfony.route`     | `bin/console debug:router --format=json`                                                |
-| `symfony.command`   | `bin/console debug:container --tag=console.command --format=json` (vendor filtered)     |
-| `laravel.route`     | `php artisan route:list --json`                                                         |
-| `laravel.command`   | inline `php -r` runner that boots Laravel and dumps `Artisan::all()` (vendor filtered)  |
-| `laravel.job`       | AST scan of `app/Jobs/` for `ShouldQueue` implementers                                  |
-| `laravel.listener`  | AST scan of `app/Listeners/` for `handle()` / `__invoke()`                              |
-| `phpunit.test`      | AST scan of `tests/` for `PHPUnit\Framework\TestCase` subclasses                        |
+| kind                       | source                                                                                                |
+| ---                        | ---                                                                                                   |
+| `symfony.route`            | `bin/console debug:router --format=json`                                                              |
+| `symfony.command`          | `bin/console debug:container --tag=console.command --format=json` (vendor filtered)                   |
+| `symfony.message_handler`  | `bin/console debug:container --tag=messenger.message_handler --format=json` (vendor filtered, message inferred via reflection on the handler's first param when the tag's `handles` is null) |
+| `laravel.route`            | `php artisan route:list --json`                                                                       |
+| `laravel.command`          | inline `php -r` runner that boots Laravel and dumps `Artisan::all()` (vendor filtered)                |
+| `laravel.job`              | AST scan of `app/Jobs/` for `ShouldQueue` implementers                                                |
+| `phpunit.test`             | AST scan of `tests/` for `PHPUnit\Framework\TestCase` subclasses                                      |
 
 watson is a CLI binary, not a bundle/provider. AST scans go through [`roave/better-reflection`](https://github.com/Roave/BetterReflection) — watson never `require_once`s your app's source.
 

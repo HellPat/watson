@@ -47,6 +47,12 @@ final class Kernel extends BaseKernel
             'handle_all_throwables' => true,
             'php_errors' => ['log' => true],
             'test' => false,
+            'messenger' => [
+                'default_bus' => 'messenger.bus.default',
+                'buses' => [
+                    'messenger.bus.default' => null,
+                ],
+            ],
         ]);
 
         // Fixture user-side command — proves watson picks up app:ping in
@@ -55,6 +61,12 @@ final class Kernel extends BaseKernel
             ->set(\App\Command\PingCommand::class)
             ->autoconfigure()
             ->tag('console.command');
+
+        // Fixture messenger handler — autoconfigure picks up the
+        // `#[AsMessageHandler]` attribute and tags it for us.
+        $container->services()
+            ->set(\App\MessageHandler\PingHandler::class)
+            ->autoconfigure();
     }
 
     protected function configureRoutes(RoutingConfigurator $routes): void

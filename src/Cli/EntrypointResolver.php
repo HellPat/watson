@@ -8,7 +8,6 @@ use Watson\Cli\Reflection\StaticReflector;
 use Watson\Cli\Source\LaravelArtisanSource;
 use Watson\Cli\Source\SymfonyConsoleSource;
 use Watson\Core\Discovery\JobCollector;
-use Watson\Core\Discovery\ListenerCollector;
 use Watson\Core\Discovery\PhpUnitCollector;
 use Watson\Core\Entrypoint\EntryPoint;
 
@@ -54,6 +53,7 @@ final class EntrypointResolver
             $eps = [
                 ...$eps,
                 ...$source->commands(),
+                ...$source->messageHandlers(),
                 ...PhpUnitCollector::collect($project->rootPath . '/tests', $reflector),
             ];
         }
@@ -76,7 +76,6 @@ final class EntrypointResolver
                 ...$eps,
                 ...$source->commands(),
                 ...JobCollector::collect($project->rootPath . '/app/Jobs', $reflector),
-                ...ListenerCollector::collect($project->rootPath . '/app/Listeners', $reflector),
                 ...PhpUnitCollector::collect($project->rootPath . '/tests', $reflector),
             ];
         }

@@ -23,11 +23,11 @@ Feature: list-entrypoints command snapshots the framework's runtime routes
     Then the JSON output contains entry points of kind "laravel.route"
     And the JSON output contains entry points of kind "laravel.command"
     And the JSON output contains entry points of kind "laravel.job"
-    And the JSON output contains entry points of kind "laravel.listener"
     And the JSON output contains entry points of kind "phpunit.test"
 
-  Scenario: Symfony scope=all surfaces routes and commands
+  Scenario: Symfony scope=all surfaces routes, commands, and message handlers
     Given the Symfony fixture
     When I run "watson list-entrypoints --scope=all"
     Then the JSON output contains entry points of kind "symfony.route"
     And the JSON output contains entry points of kind "symfony.command"
+    And the JSON output contains entry points of kind "symfony.message_handler"
