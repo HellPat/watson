@@ -38,7 +38,8 @@ final class ComposerProjectStaging
             return $projectRoot;
         }
 
-        if (!self::needsSanitize($composer, $installed)) {
+        $vendorDir = $projectRoot . '/vendor';
+        if (!self::needsSanitize($projectRoot, $vendorDir, $composer, $installed)) {
             return $projectRoot;
         }
 
@@ -50,7 +51,7 @@ final class ComposerProjectStaging
             return $projectRoot;
         }
 
-        $sanitizedComposer = self::stripEmptyKeys($composer);
+        $sanitizedComposer = self::sanitizePackage($composer, $projectRoot);
         file_put_contents(
             $stage . '/composer.json',
             (string) json_encode($sanitizedComposer, JSON_UNESCAPED_SLASHES),
@@ -58,12 +59,12 @@ final class ComposerProjectStaging
 
         if (isset($installed['packages']) && is_array($installed['packages'])) {
             $installed['packages'] = array_map(
-                static fn (array $p): array => self::stripEmptyKeys($p),
+                static fn (array $p): array => self::sanitizePackage($p, self::packageBaseDir($vendorDir, $p)),
                 $installed['packages'],
             );
         } elseif (array_is_list($installed)) {
             $installed = array_map(
-                static fn (array $p): array => self::stripEmptyKeys($p),
+                static fn (array $p): array => self::sanitizePackage($p, self::packageBaseDir($vendorDir, $p)),
                 $installed,
             );
         }
@@ -112,43 +113,90 @@ final class ComposerProjectStaging
         return is_array($decoded) ? $decoded : null;
     }
 
-    private static function needsSanitize(array $composer, array $installed): bool
+    private static function needsSanitize(string $projectRoot, string $vendorDir, array $composer, array $installed): bool
     {
-        if (self::pkgHasEmptyKey($composer)) {
+        if (self::pkgHasInvalidEntry($composer, $projectRoot)) {
             return true;
         }
         $packages = $installed['packages'] ?? (array_is_list($installed) ? $installed : []);
         foreach ($packages as $p) {
-            if (is_array($p) && self::pkgHasEmptyKey($p)) {
+            if (is_array($p) && self::pkgHasInvalidEntry($p, self::packageBaseDir($vendorDir, $p))) {
                 return true;
             }
         }
         return false;
     }
 
-    private static function pkgHasEmptyKey(array $pkg): bool
+    private static function pkgHasInvalidEntry(array $pkg, string $baseDir): bool
     {
         foreach (['autoload', 'autoload-dev'] as $section) {
             foreach (['psr-4', 'psr-0'] as $kind) {
                 $map = $pkg[$section][$kind] ?? null;
-                if (is_array($map) && array_key_exists('', $map)) {
+                if (!is_array($map)) {
+                    continue;
+                }
+                if (array_key_exists('', $map)) {
                     return true;
+                }
+                foreach ($map as $paths) {
+                    foreach ((array) $paths as $path) {
+                        if (!is_string($path)) {
+                            continue;
+                        }
+                        if (!is_dir($baseDir . '/' . ltrim($path, '/'))) {
+                            return true;
+                        }
+                    }
                 }
             }
         }
         return false;
     }
 
-    private static function stripEmptyKeys(array $pkg): array
+    private static function sanitizePackage(array $pkg, string $baseDir): array
     {
         foreach (['autoload', 'autoload-dev'] as $section) {
             foreach (['psr-4', 'psr-0'] as $kind) {
-                if (isset($pkg[$section][$kind]) && is_array($pkg[$section][$kind])) {
-                    unset($pkg[$section][$kind]['']);
+                $map = $pkg[$section][$kind] ?? null;
+                if (!is_array($map)) {
+                    continue;
+                }
+                unset($map['']);
+                foreach ($map as $prefix => $paths) {
+                    $kept = [];
+                    foreach ((array) $paths as $path) {
+                        if (is_string($path) && is_dir($baseDir . '/' . ltrim($path, '/'))) {
+                            $kept[] = $path;
+                        }
+                    }
+                    if ($kept === []) {
+                        unset($map[$prefix]);
+                    } else {
+                        $map[$prefix] = is_array($paths) ? $kept : $kept[0];
+                    }
+                }
+                if ($map === []) {
+                    unset($pkg[$section][$kind]);
+                } else {
+                    $pkg[$section][$kind] = $map;
                 }
             }
         }
         return $pkg;
+    }
+
+    private static function packageBaseDir(string $vendorDir, array $pkg): string
+    {
+        $installPath = $pkg['install-path'] ?? null;
+        if (is_string($installPath) && $installPath !== '') {
+            $candidate = realpath($vendorDir . '/composer/' . $installPath);
+            if ($candidate !== false) {
+                return $candidate;
+            }
+            return $vendorDir . '/composer/' . $installPath;
+        }
+        $name = $pkg['name'] ?? '';
+        return $vendorDir . '/' . $name;
     }
 
     private static function rmrf(string $dir): void

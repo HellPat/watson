@@ -17,6 +17,9 @@ final class ComposerProjectStagingTest extends TestCase
         mkdir($this->project . '/vendor/composer', 0700, true);
         mkdir($this->project . '/vendor/acme/lib/src', 0700, true);
         file_put_contents($this->project . '/vendor/acme/lib/src/Foo.php', '<?php class Foo {}');
+        // The consumer's `Acme\\ => src/` mapping needs a real dir for the
+        // sanitiser to consider the project clean.
+        mkdir($this->project . '/src', 0700, true);
     }
 
     protected function tearDown(): void
@@ -41,6 +44,9 @@ final class ComposerProjectStagingTest extends TestCase
 
     public function testStagesSanitizedRootWhenInstalledHasEmptyPrefix(): void
     {
+        // Make Carbonite\\ resolve to a real dir so it survives sanitisation —
+        // only the empty prefix should be dropped.
+        mkdir($this->project . '/vendor/kylekatarnls/carbonite/src', 0700, true);
         $this->writeJson('composer.json', [
             'name' => 'acme/app',
             'autoload' => ['psr-4' => ['Acme\\' => 'src/']],
@@ -48,10 +54,15 @@ final class ComposerProjectStagingTest extends TestCase
         $this->writeJson('vendor/composer/installed.json', [
             'packages' => [
                 [
-                    'name'     => 'kylekatarnls/carbonite',
-                    'autoload' => ['psr-4' => ['' => 'src/', 'Carbonite\\' => 'src/']],
+                    'name'         => 'kylekatarnls/carbonite',
+                    'install-path' => '../kylekatarnls/carbonite',
+                    'autoload'     => ['psr-4' => ['' => 'src/', 'Carbonite\\' => 'src/']],
                 ],
-                ['name' => 'acme/lib', 'autoload' => ['psr-4' => ['Acme\\Lib\\' => 'src/']]],
+                [
+                    'name'         => 'acme/lib',
+                    'install-path' => '../acme/lib',
+                    'autoload'     => ['psr-4' => ['Acme\\Lib\\' => 'src/']],
+                ],
             ],
         ]);
 
@@ -94,7 +105,11 @@ final class ComposerProjectStagingTest extends TestCase
     {
         $this->writeJson('composer.json', ['name' => 'acme/app']);
         $this->writeJson('vendor/composer/installed.json', [
-            ['name' => 'acme/lib', 'autoload' => ['psr-4' => ['' => 'src/']]],
+            [
+                'name'         => 'acme/lib',
+                'install-path' => '../acme/lib',
+                'autoload'     => ['psr-4' => ['' => 'src/']],
+            ],
         ]);
 
         $stage = ComposerProjectStaging::prepare($this->project);
@@ -103,6 +118,33 @@ final class ComposerProjectStagingTest extends TestCase
         $sanitized = json_decode((string) file_get_contents($stage . '/vendor/composer/installed.json'), true);
         self::assertIsArray($sanitized);
         self::assertArrayNotHasKey('', $sanitized[0]['autoload']['psr-4'] ?? []);
+    }
+
+    public function testDropsPrefixWhoseTargetDirIsMissing(): void
+    {
+        // Mapping points to a non-existent dir — BetterReflection rejects this
+        // outright, so the sanitiser must drop the entry completely.
+        $this->writeJson('composer.json', ['name' => 'acme/app']);
+        $this->writeJson('vendor/composer/installed.json', [
+            'packages' => [
+                [
+                    'name'         => 'acme/lib',
+                    'install-path' => '../acme/lib',
+                    'autoload'     => ['psr-4' => [
+                        'Acme\\Lib\\'      => 'src/',
+                        'Acme\\Missing\\'  => 'database/factories/',
+                    ]],
+                ],
+            ],
+        ]);
+
+        $stage = ComposerProjectStaging::prepare($this->project);
+        self::assertNotSame($this->project, $stage);
+
+        $sanitized = json_decode((string) file_get_contents($stage . '/vendor/composer/installed.json'), true);
+        $psr4 = $sanitized['packages'][0]['autoload']['psr-4'] ?? [];
+        self::assertArrayHasKey('Acme\\Lib\\', $psr4);
+        self::assertArrayNotHasKey('Acme\\Missing\\', $psr4);
     }
 
     public function testReturnsOriginalRootWhenJsonMissing(): void
