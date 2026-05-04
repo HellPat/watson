@@ -9,7 +9,7 @@ use PhpParser\NodeFinder;
 use PhpParser\NodeTraverser;
 use PhpParser\NodeVisitor\NameResolver;
 use PhpParser\ParserFactory;
-use Watson\Cli\Reflection\StaticReflector;
+use Composer\Autoload\ClassLoader;
 use Watson\Core\Entrypoint\EntryPoint;
 
 /**
@@ -50,7 +50,7 @@ final class TransitiveReach
     public static function affectedIndices(
         array $entryPoints,
         array $changedFiles,
-        StaticReflector $reflector,
+        ClassLoader $classLoader,
         string $projectRoot,
         int $maxFiles = self::MAX_FILES_DEFAULT,
     ): array {
@@ -75,7 +75,7 @@ final class TransitiveReach
         // Step 1: forward graph from every entry-point handler file.
         $forward = self::buildForwardGraph(
             self::collectSeedFiles($entryPoints, $rootReal, $vendorReal),
-            $reflector,
+            $classLoader,
             $parser,
             $finder,
             $rootReal,
@@ -128,7 +128,7 @@ final class TransitiveReach
      */
     private static function buildForwardGraph(
         array $seeds,
-        StaticReflector $reflector,
+        ClassLoader $classLoader,
         \PhpParser\Parser $parser,
         NodeFinder $finder,
         string $rootReal,
@@ -147,7 +147,7 @@ final class TransitiveReach
             if (isset($forward[$file])) {
                 continue;
             }
-            $edges = self::resolveOutgoingEdges($file, $reflector, $parser, $finder, $rootReal, $vendorReal, $fqnCache);
+            $edges = self::resolveOutgoingEdges($file, $classLoader, $parser, $finder, $rootReal, $vendorReal, $fqnCache);
             $forward[$file] = $edges;
             foreach ($edges as $next) {
                 if (!isset($forward[$next])) {
@@ -213,7 +213,7 @@ final class TransitiveReach
      */
     private static function resolveOutgoingEdges(
         string $file,
-        StaticReflector $reflector,
+        ClassLoader $classLoader,
         \PhpParser\Parser $parser,
         NodeFinder $finder,
         string $rootReal,
@@ -255,14 +255,11 @@ final class TransitiveReach
             }
 
             $resolvedFile = null;
-            $class        = $reflector->reflectClass($fqn);
-            if ($class !== null) {
-                $classFileName = $class->getFileName();
-                if (is_string($classFileName) && $classFileName !== '') {
-                    $classReal = realpath($classFileName);
-                    if ($classReal !== false && self::insideProject($classReal, $rootReal, $vendorReal)) {
-                        $resolvedFile = $classReal;
-                    }
+            $found        = $classLoader->findFile($fqn);
+            if (is_string($found) && $found !== '') {
+                $real = realpath($found);
+                if ($real !== false && self::insideProject($real, $rootReal, $vendorReal)) {
+                    $resolvedFile = $real;
                 }
             }
             $fqnCache[$fqn] = $resolvedFile;

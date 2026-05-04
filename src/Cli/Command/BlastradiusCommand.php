@@ -9,9 +9,9 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
+use Composer\Autoload\ClassLoader;
 use Watson\Cli\EntrypointResolver;
 use Watson\Cli\ProjectDetector;
-use Watson\Cli\Reflection\StaticReflector;
 use Watson\Core\Analysis\Blastradius;
 use Watson\Core\Diff\ChangedFilesReader;
 use Watson\Core\Output\Envelope;
@@ -83,8 +83,8 @@ final class BlastradiusCommand extends Command
             ));
         }
 
-        $reflector = new StaticReflector($project->rootPath);
-        Blastradius::run($envelope, $project->rootPath, $changedFiles, $eps, $reflector);
+        $classLoader = self::loadConsumerClassLoader($project->rootPath);
+        Blastradius::run($envelope, $project->rootPath, $changedFiles, $eps, $classLoader);
 
         $output->write(Renderer::render((string) $input->getOption('format'), $envelope));
 
@@ -122,6 +122,22 @@ final class BlastradiusCommand extends Command
         return $unifiedDiff
             ? ChangedFilesReader::readUnifiedDiff($stdin, $projectRoot)
             : ChangedFilesReader::readNameOnly($stdin, $projectRoot);
+    }
+
+    /**
+     * Load the consumer's Composer autoloader without registering it (so we
+     * don't perturb watson's own runtime). `vendor/autoload.php` returns the
+     * `ClassLoader` instance after `composer-runtime-api` >= 2.0 — that's
+     * what we use to map FQN → file at native Composer speed.
+     */
+    private static function loadConsumerClassLoader(string $projectRoot): ?ClassLoader
+    {
+        $autoload = $projectRoot . '/vendor/autoload.php';
+        if (!is_file($autoload)) {
+            return null;
+        }
+        $loader = require $autoload;
+        return $loader instanceof ClassLoader ? $loader : null;
     }
 
     private static function printUsage(OutputInterface $output): void

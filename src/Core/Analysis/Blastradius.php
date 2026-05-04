@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Watson\Core\Analysis;
 
-use Watson\Cli\Reflection\StaticReflector;
+use Composer\Autoload\ClassLoader;
 use Watson\Core\Entrypoint\EntryPoint;
 use Watson\Core\Output\Envelope;
 use Watson\Core\Reach\FileLevelReach;
@@ -38,7 +38,7 @@ final class Blastradius
         string $projectRoot,
         array $changedFiles,
         array $entryPoints,
-        ?StaticReflector $reflector = null,
+        ?ClassLoader $classLoader = null,
     ): void {
         $directHits = array_fill_keys(
             FileLevelReach::affectedIndices($entryPoints, $changedFiles),
@@ -46,9 +46,9 @@ final class Blastradius
         );
 
         $transitiveHits = [];
-        if ($reflector !== null) {
+        if ($classLoader !== null) {
             $transitiveHits = array_fill_keys(
-                TransitiveReach::affectedIndices($entryPoints, $changedFiles, $reflector, $projectRoot),
+                TransitiveReach::affectedIndices($entryPoints, $changedFiles, $classLoader, $projectRoot),
                 true,
             );
         }

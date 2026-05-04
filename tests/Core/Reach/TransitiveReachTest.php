@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Watson\Tests\Core\Reach;
 
 use PHPUnit\Framework\TestCase;
-use Watson\Cli\Reflection\StaticReflector;
+use Composer\Autoload\ClassLoader;
 use Watson\Core\Entrypoint\EntryPoint;
 use Watson\Core\Entrypoint\Source;
 use Watson\Core\Reach\TransitiveReach;
@@ -50,7 +50,7 @@ final class TransitiveReachTest extends TestCase
             }
         ');
 
-        $reflector = new StaticReflector($this->project);
+        $reflector = $this->makeLoader();
         $eps       = [$this->ep('App\\Jobs\\MyJob', $job)];
 
         $hits = TransitiveReach::affectedIndices($eps, [$service], $reflector, $this->project);
@@ -77,7 +77,7 @@ final class TransitiveReachTest extends TestCase
             }
         ');
 
-        $reflector = new StaticReflector($this->project);
+        $reflector = $this->makeLoader();
         $eps       = [$this->ep('App\\Jobs\\MyJob', $job)];
 
         $hits = TransitiveReach::affectedIndices($eps, [$other], $reflector, $this->project);
@@ -104,7 +104,7 @@ final class TransitiveReachTest extends TestCase
             }
         ');
 
-        $reflector = new StaticReflector($this->project);
+        $reflector = $this->makeLoader();
         $eps       = [$this->ep('App\\Jobs\\MyJob', $job)];
 
         $hits = TransitiveReach::affectedIndices($eps, [$service], $reflector, $this->project);
@@ -127,7 +127,7 @@ final class TransitiveReachTest extends TestCase
             }
         ');
 
-        $reflector = new StaticReflector($this->project);
+        $reflector = $this->makeLoader();
         $eps       = [$this->ep('App\\Jobs\\MyJob', $job)];
 
         $hits = TransitiveReach::affectedIndices($eps, [$service], $reflector, $this->project);
@@ -156,7 +156,7 @@ final class TransitiveReachTest extends TestCase
             }
         ');
 
-        $reflector = new StaticReflector($this->project);
+        $reflector = $this->makeLoader();
         $eps       = [$this->ep('App\\Jobs\\MyJob', $job)];
 
         $hits = TransitiveReach::affectedIndices($eps, [$mapper], $reflector, $this->project);
@@ -166,9 +166,16 @@ final class TransitiveReachTest extends TestCase
 
     public function testReturnsEmptyWhenNoChangedFiles(): void
     {
-        $reflector = new StaticReflector($this->project);
+        $reflector = $this->makeLoader();
         $eps       = [$this->ep('App\\Jobs\\MyJob', $this->project . '/app/Jobs/MyJob.php')];
         self::assertSame([], TransitiveReach::affectedIndices($eps, [], $reflector, $this->project));
+    }
+
+    private function makeLoader(): ClassLoader
+    {
+        $loader = new ClassLoader();
+        $loader->addPsr4('App\\', $this->project . '/app/');
+        return $loader;
     }
 
     private function ep(string $fqn, string $path): EntryPoint
