@@ -39,6 +39,7 @@ final class Blastradius
         array $changedFiles,
         array $entryPoints,
         ?ClassLoader $classLoader = null,
+        int $maxDepth = 3,
     ): void {
         $directHits = array_fill_keys(
             FileLevelReach::affectedIndices($entryPoints, $changedFiles),
@@ -48,7 +49,7 @@ final class Blastradius
         $transitiveHits = [];
         if ($classLoader !== null) {
             $transitiveHits = array_fill_keys(
-                TransitiveReach::affectedIndices($entryPoints, $changedFiles, $classLoader, $projectRoot),
+                TransitiveReach::affectedIndices($entryPoints, $changedFiles, $classLoader, $projectRoot, maxDepth: $maxDepth),
                 true,
             );
         }

@@ -34,6 +34,7 @@ final class BlastradiusCommand extends Command
             ->addOption('format', null, InputOption::VALUE_REQUIRED, 'Output format: text (human terminal), md (markdown for PRs/LLMs), json (machine), tok (tab-separated, token-optimized for LLM pipes)', 'text')
             ->addOption('scope', null, InputOption::VALUE_REQUIRED, 'routes (cheapest, runtime registry only) or all (adds commands / jobs / listeners / tests)', 'all')
             ->addOption('app-env', null, InputOption::VALUE_REQUIRED, 'APP_ENV passed to bin/console / artisan', 'dev')
+            ->addOption('max-depth', null, InputOption::VALUE_REQUIRED, 'Maximum BFS hops the transitive-reach pass walks from any entry point. Lower = tighter signal, higher = more recall.', '3')
             ->setHelp(<<<HELP
                 Reads the list of changed files from stdin (one path per line) and reports which framework entry points reach those files.
 
@@ -84,7 +85,8 @@ final class BlastradiusCommand extends Command
         }
 
         $classLoader = self::loadConsumerClassLoader($project->rootPath);
-        Blastradius::run($envelope, $project->rootPath, $changedFiles, $eps, $classLoader);
+        $maxDepth    = max(0, (int) $input->getOption('max-depth'));
+        Blastradius::run($envelope, $project->rootPath, $changedFiles, $eps, $classLoader, $maxDepth);
 
         $output->write(Renderer::render((string) $input->getOption('format'), $envelope));
 
