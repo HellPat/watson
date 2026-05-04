@@ -15,6 +15,96 @@ watson does not shell out to git. You pipe a file list (or a unified diff) in, w
 
 ---
 
+## Output formats
+
+Same data, four shapes. Pick the one that fits the consumer.
+
+### `--format=text` (default — human terminal)
+
+```
+=====================================================================
+watson php symfony (root: /abs/path)
+=====================================================================
+
+[list-entrypoints]
+
+  3 entry point(s):
+    - symfony.route            home              App\Controller\HelloController::home
+    - symfony.command          app:ping          App\Command\PingCommand::execute
+    - symfony.message_handler  App\Message\Ping  App\MessageHandler\PingHandler::__invoke
+```
+
+### `--format=md` (markdown for PR descriptions / LLM prompts)
+
+````markdown
+# watson — php symfony
+
+_tool watson v0.3.0_
+
+Root: `/abs/path`
+
+## list-entrypoints
+_v0.3.0_
+
+**3 entry points**
+
+| kind | name | handler |
+|---|---|---|
+| `symfony.route` | `home` | `App\Controller\HelloController::home` (`src/Controller/HelloController.php:12`) |
+| `symfony.command` | `app:ping` | `App\Command\PingCommand::execute` (`src/Command/PingCommand.php:15`) |
+| `symfony.message_handler` | `App\Message\PingMessage` | `App\MessageHandler\PingHandler::__invoke` (`src/MessageHandler/PingHandler.php:13`) |
+````
+
+### `--format=json` (machine contract)
+
+```json
+{
+  "tool": "watson",
+  "version": "0.3.0",
+  "language": "php",
+  "framework": "symfony",
+  "context": {"root": "/abs/path"},
+  "analyses": [
+    {
+      "name": "list-entrypoints",
+      "version": "0.3.0",
+      "ok": true,
+      "result": {
+        "entry_points": [
+          {
+            "kind": "symfony.route",
+            "name": "home",
+            "handler_fqn": "App\\Controller\\HelloController::home",
+            "handler_path": "/abs/path/src/Controller/HelloController.php",
+            "handler_line": 12,
+            "source": "runtime",
+            "extra": {"path": "/", "methods": ["GET"]}
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+### `--format=tok` (token-optimized for LLM pipes)
+
+Tab-separated, no JSON keys, no whitespace padding. Header lines start with `#`. Per-row layout: `kind \t name \t handler_fqn \t relative/path:line \t extra` (extra is HTTP-method + path for routes, message FQN for handlers, empty otherwise).
+
+```
+# watson 0.3.0 list-entrypoints php/symfony root=/abs/path
+# entrypoints=3
+# kinds: sc=symfony.command smh=symfony.message_handler sr=symfony.route
+# fields: kind\tname\thandler\tpath:line\textra
+sr	home	App\Controller\HelloController::home	src/Controller/HelloController.php:12	GET /
+sc	app:ping	App\Command\PingCommand::execute	src/Command/PingCommand.php:15	
+smh	App\Message\PingMessage	App\MessageHandler\PingHandler::__invoke	src/MessageHandler/PingHandler.php:13
+```
+
+Roughly half the token cost of pretty-printed JSON.
+
+---
+
 ## Recipes
 
 Each block below is a description followed by the command. All examples assume `composer require --dev hellpat/watson` is done.
@@ -174,23 +264,6 @@ Options:
                          handlers / tests) [default: "all"]
       --app-env=APP-ENV  APP_ENV passed to bin/console / artisan [default: "dev"]
 ```
-
-### `--format=tok` — token-optimized for LLM pipes
-
-Tab-separated, no JSON keys, no whitespace padding. Header lines start with `#`. Designed for piping into LLM prompts where every token costs money.
-
-```
-# watson 0.3.0 list-entrypoints php/laravel root=/abs/path
-# entrypoints=4
-# kinds: lc=laravel.command lj=laravel.job lr=laravel.route pt=phpunit.test
-# fields: kind\tname\thandler\tpath:line\textra
-lr	users.show	App\Http\Controllers\UserController::show	app/Http/Controllers/UserController.php:42	GET /users/{id}
-lc	app:ping	App\Console\Commands\PingCommand::handle	app/Console/Commands/PingCommand.php:14
-lj	App\Jobs\PingJob	App\Jobs\PingJob::handle	app/Jobs/PingJob.php:11
-pt	SmokeTest::testPasses	Tests\Unit\SmokeTest::testPasses	tests/Unit/SmokeTest.php:11
-```
-
-Per-row layout: `kind \t name \t handler_fqn \t relative/path:line \t extra` (extra is HTTP-method+path for routes, empty otherwise).
 
 ---
 
