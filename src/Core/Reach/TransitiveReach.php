@@ -45,10 +45,12 @@ use Watson\Core\Entrypoint\EntryPoint;
 final class TransitiveReach
 {
     private const MAX_FILES_DEFAULT = 5000;
+    private const MAX_DEPTH_DEFAULT = 3;
 
     /**
      * @param list<EntryPoint> $entryPoints
      * @param list<string>     $changedFiles absolute paths
+     * @param int              $maxDepth     hops from any entry-point handler file we follow before stopping; bounded recall in exchange for a much sharper signal on real apps
      * @return list<int>       indices into $entryPoints whose closure intersects the diff
      */
     public static function affectedIndices(
@@ -57,6 +59,7 @@ final class TransitiveReach
         ClassLoader $classLoader,
         string $projectRoot,
         int $maxFiles = self::MAX_FILES_DEFAULT,
+        int $maxDepth = self::MAX_DEPTH_DEFAULT,
     ): array {
         if ($entryPoints === [] || $changedFiles === []) {
             return [];
@@ -76,13 +79,15 @@ final class TransitiveReach
         $parser = (new ParserFactory())->createForHostVersion();
 
         // Step 1: forward graph from every entry-point handler file.
+        $seeds = self::collectSeedFiles($entryPoints, $rootReal, $vendorReal);
         $forward = self::buildForwardGraph(
-            self::collectSeedFiles($entryPoints, $rootReal, $vendorReal),
+            $seeds,
             $classLoader,
             $parser,
             $rootReal,
             $vendorReal,
             $maxFiles,
+            $maxDepth,
         );
 
         // Step 2: invert and BFS backwards from the diff.
@@ -135,10 +140,16 @@ final class TransitiveReach
         string $rootReal,
         string|false $vendorReal,
         int $maxFiles,
+        int $maxDepth,
     ): array {
         $forward  = [];
         $fqnCache = [];
-        $queue    = $seeds;
+        $depth    = []; // file → BFS distance from nearest seed
+        $queue    = [];
+        foreach ($seeds as $seed) {
+            $depth[$seed] = 0;
+            $queue[]      = $seed;
+        }
 
         while ($queue !== []) {
             if (count($forward) >= $maxFiles) {
@@ -148,11 +159,16 @@ final class TransitiveReach
             if (isset($forward[$file])) {
                 continue;
             }
+            $d = $depth[$file] ?? 0;
             $edges = self::resolveOutgoingEdges($file, $classLoader, $parser, $rootReal, $vendorReal, $fqnCache);
             $forward[$file] = $edges;
+            if ($d >= $maxDepth) {
+                continue;
+            }
             foreach ($edges as $next) {
-                if (!isset($forward[$next])) {
-                    $queue[] = $next;
+                if (!isset($forward[$next]) && !isset($depth[$next])) {
+                    $depth[$next] = $d + 1;
+                    $queue[]      = $next;
                 }
             }
         }
