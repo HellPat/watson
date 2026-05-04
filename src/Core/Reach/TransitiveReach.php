@@ -68,10 +68,23 @@ final class TransitiveReach
 
         $parser = (new ParserFactory())->createForHostVersion();
         $finder = new NodeFinder();
+        // Cache: absolute file path → list of project-internal absolute file
+        // paths it directly references. Built lazily during the first BFS
+        // and reused across every subsequent entry point's traversal.
+        $fileEdges = [];
 
         $hits = [];
         foreach ($entryPoints as $idx => $ep) {
-            $reached = self::collectClosure($ep->handlerPath, $reflector, $parser, $finder, $rootReal, $vendorReal, $maxVisited);
+            $reached = self::collectClosure(
+                $ep->handlerPath,
+                $reflector,
+                $parser,
+                $finder,
+                $rootReal,
+                $vendorReal,
+                $maxVisited,
+                $fileEdges,
+            );
             foreach ($reached as $file) {
                 if (isset($changedSet[$file])) {
                     $hits[] = $idx;
@@ -102,8 +115,12 @@ final class TransitiveReach
 
     /**
      * BFS the static call graph from $startFile, returning the set of
-     * project files reached. Each visited file is parsed once; resolved
-     * class names point at files that the reflector can locate.
+     * project files reached. The first time a file is visited we resolve
+     * its outgoing edges (referenced project files) and cache them in
+     * `$fileEdges`; subsequent traversals reuse the edge list rather than
+     * reparsing the file.
+     *
+     * @param array<string, list<string>> $fileEdges in-out cache: file → outgoing edges
      */
     private static function collectClosure(
         string $startFile,
@@ -113,6 +130,7 @@ final class TransitiveReach
         string $rootReal,
         string|false $vendorReal,
         int $maxVisited,
+        array &$fileEdges,
     ): array {
         $startReal = realpath($startFile);
         if ($startReal === false) {
@@ -130,52 +148,89 @@ final class TransitiveReach
                 break;
             }
             $file = array_shift($queue);
-            $code = @file_get_contents($file);
-            if (!is_string($code)) {
-                continue;
+            $edges = $fileEdges[$file] ?? null;
+            if ($edges === null) {
+                $edges = self::resolveOutgoingEdges($file, $reflector, $parser, $finder, $rootReal, $vendorReal);
+                $fileEdges[$file] = $edges;
             }
-            try {
-                $ast = $parser->parse($code);
-            } catch (\Throwable) {
-                continue;
-            }
-            if ($ast === null) {
-                continue;
-            }
-
-            $resolved = self::resolveNames($ast);
-            $names    = $finder->findInstanceOf($resolved, Name::class);
-
-            foreach ($names as $name) {
-                /** @var Name $name */
-                $fqn = ltrim($name->toString(), '\\');
-                if ($fqn === '' || in_array($fqn, ['self', 'static', 'parent', 'true', 'false', 'null', 'mixed', 'void', 'never', 'iterable', 'callable', 'object', 'array', 'int', 'string', 'float', 'bool'], true)) {
+            foreach ($edges as $next) {
+                if (isset($visited[$next])) {
                     continue;
                 }
-                $class = $reflector->reflectClass($fqn);
-                if ($class === null) {
-                    continue;
-                }
-                $classFileName = $class->getFileName();
-                if ($classFileName === null || $classFileName === '') {
-                    continue;
-                }
-                $classReal = realpath($classFileName);
-                if ($classReal === false) {
-                    continue;
-                }
-                if (!self::insideProject($classReal, $rootReal, $vendorReal)) {
-                    continue;
-                }
-                if (isset($visited[$classReal])) {
-                    continue;
-                }
-                $visited[$classReal] = true;
-                $queue[] = $classReal;
+                $visited[$next] = true;
+                $queue[] = $next;
             }
         }
 
         return array_keys($visited);
+    }
+
+    /**
+     * Parse $file and return the absolute paths of every project-internal
+     * file it references via class names. Vendor + out-of-project files
+     * are pruned here so the cached edge list stays project-scoped.
+     *
+     * @return list<string>
+     */
+    private static function resolveOutgoingEdges(
+        string $file,
+        StaticReflector $reflector,
+        \PhpParser\Parser $parser,
+        NodeFinder $finder,
+        string $rootReal,
+        string|false $vendorReal,
+    ): array {
+        $code = @file_get_contents($file);
+        if (!is_string($code)) {
+            return [];
+        }
+        try {
+            $ast = $parser->parse($code);
+        } catch (\Throwable) {
+            return [];
+        }
+        if ($ast === null) {
+            return [];
+        }
+
+        $resolved = self::resolveNames($ast);
+        $names    = $finder->findInstanceOf($resolved, Name::class);
+
+        $edges = [];
+        $seenFqns = [];
+        foreach ($names as $name) {
+            /** @var Name $name */
+            $fqn = ltrim($name->toString(), '\\');
+            if ($fqn === '' || isset($seenFqns[$fqn]) || self::isReservedName($fqn)) {
+                continue;
+            }
+            $seenFqns[$fqn] = true;
+            $class = $reflector->reflectClass($fqn);
+            if ($class === null) {
+                continue;
+            }
+            $classFileName = $class->getFileName();
+            if ($classFileName === null || $classFileName === '') {
+                continue;
+            }
+            $classReal = realpath($classFileName);
+            if ($classReal === false || !self::insideProject($classReal, $rootReal, $vendorReal)) {
+                continue;
+            }
+            $edges[$classReal] = true;
+        }
+        return array_keys($edges);
+    }
+
+    private static function isReservedName(string $fqn): bool
+    {
+        return in_array(
+            $fqn,
+            ['self', 'static', 'parent', 'true', 'false', 'null',
+             'mixed', 'void', 'never', 'iterable', 'callable',
+             'object', 'array', 'int', 'string', 'float', 'bool'],
+            true,
+        );
     }
 
     /**
