@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace Watson\Core\Output;
 
+use Symfony\Component\Console\Helper\Table;
+use Symfony\Component\Console\Helper\TableStyle;
+use Symfony\Component\Console\Output\BufferedOutput;
+use Symfony\Component\Console\Output\OutputInterface;
+
 /**
  * One renderer to dispatch by `--format`. JSON is the contract for
  * downstream tooling; markdown is tuned for PR descriptions and AI
@@ -305,20 +310,16 @@ final class Renderer
                 return;
             }
             foreach (self::groupByKind($eps) as $kind => $entries) {
-                $icon = self::kindIcon($kind);
-                $lines[] = sprintf('#### %s `%s` &nbsp;·&nbsp; %d', $icon, $kind, count($entries));
-                $lines[] = '';
-                $lines[] = '| name | handler |';
-                $lines[] = '|---|---|';
+                $rows = [];
                 foreach ($entries as $ep) {
-                    $name = self::formatListName($ep, $kind);
-                    $handler = self::formatHandlerCell(
-                        $ep['handler_fqn'] ?? '?',
-                        $ep['handler_path'] ?? '',
-                        (int) ($ep['handler_line'] ?? 0),
-                    );
-                    $lines[] = sprintf('| %s | %s |', $name, $handler);
+                    $rows[] = [
+                        self::formatName($ep['extra'] ?? null, $ep['name'] ?? '?'),
+                        self::formatHandler($ep['handler_fqn'] ?? '?', $ep['handler_path'] ?? '', (int) ($ep['handler_line'] ?? 0)),
+                    ];
                 }
+                $lines[] = sprintf('#### %s `%s` — %d', self::kindIcon($kind), $kind, count($entries));
+                $lines[] = '';
+                self::appendCodeFenceTable($lines, ['name', 'handler'], $rows);
                 $lines[] = '';
             }
 
@@ -330,7 +331,7 @@ final class Renderer
             $files   = (int) ($summary['files_changed'] ?? 0);
             $hits    = (int) ($summary['entry_points_affected'] ?? 0);
             $lines[] = sprintf(
-                '**Summary** &nbsp; 📂 `%d` file%s &nbsp;·&nbsp; 🎯 `%d` entry point%s affected',
+                '**Summary** — 📂 `%d` file%s · 🎯 `%d` entry point%s affected',
                 $files,
                 $files === 1 ? '' : 's',
                 $hits,
@@ -344,24 +345,62 @@ final class Renderer
                 return;
             }
             foreach (self::groupByKind($affected) as $kind => $entries) {
-                $icon = self::kindIcon($kind);
-                $lines[] = sprintf('#### %s `%s` &nbsp;·&nbsp; %d', $icon, $kind, count($entries));
-                $lines[] = '';
-                $lines[] = '| reach | name | handler |';
-                $lines[] = '|---|---|---|';
+                $rows = [];
                 foreach ($entries as $ep) {
-                    $reach   = self::reachBadge($ep['min_confidence'] ?? null);
-                    $name    = self::formatBlastName($ep, $kind);
-                    $handler = self::formatHandlerCell(
-                        $ep['handler']['fqn']  ?? '?',
-                        $ep['handler']['path'] ?? '',
-                        (int) ($ep['handler']['line'] ?? 0),
-                    );
-                    $lines[] = sprintf('| %s | %s | %s |', $reach, $name, $handler);
+                    $rows[] = [
+                        self::reachBadge($ep['min_confidence'] ?? null),
+                        self::formatName($ep['extra'] ?? null, $ep['name'] ?? '?'),
+                        self::formatHandler($ep['handler']['fqn'] ?? '?', $ep['handler']['path'] ?? '', (int) ($ep['handler']['line'] ?? 0)),
+                    ];
                 }
+                $lines[] = sprintf('#### %s `%s` — %d', self::kindIcon($kind), $kind, count($entries));
+                $lines[] = '';
+                self::appendCodeFenceTable($lines, ['reach', 'name', 'handler'], $rows);
                 $lines[] = '';
             }
         }
+    }
+
+    /**
+     * Render a Symfony Console `Table` with the box-drawing UTF-8 style and
+     * append it inside a fenced code block — markdown viewers (GitHub PRs,
+     * VS Code preview, Bitbucket) keep the fixed-width grid aligned and the
+     * box characters stay sharp at any zoom level. We use a `BufferedOutput`
+     * to capture the rendered string without touching stdout.
+     *
+     * @param list<string>            $headers
+     * @param list<list<string>>      $rows
+     * @param-out list<string>        $lines
+     */
+    private static function appendCodeFenceTable(array &$lines, array $headers, array $rows): void
+    {
+        $buffer = new BufferedOutput(OutputInterface::VERBOSITY_NORMAL, false);
+        $table  = new Table($buffer);
+        $table->setHeaders($headers);
+        $table->setRows($rows);
+        $table->setStyle(self::watsonTableStyle());
+        $table->render();
+
+        $rendered = rtrim($buffer->fetch(), "\n");
+        $lines[]  = '```text';
+        foreach (explode("\n", $rendered) as $row) {
+            $lines[] = $row;
+        }
+        $lines[] = '```';
+    }
+
+    private static function watsonTableStyle(): TableStyle
+    {
+        // UTF-8 box-drawing — the default `box` style with light verticals
+        // so wide tables still feel readable in PR comments. Created on
+        // demand because TableStyle isn't immutable.
+        $style = new TableStyle();
+        $style
+            ->setHorizontalBorderChars('─')
+            ->setVerticalBorderChars('│')
+            ->setDefaultCrossingChar('┼')
+            ->setCrossingChars('┼', '┌', '┬', '┐', '┤', '┘', '┴', '└', '├');
+        return $style;
     }
 
     private static function kindIcon(string $kind): string
@@ -382,46 +421,31 @@ final class Renderer
     private static function reachBadge(?string $confidence): string
     {
         return match ($confidence) {
-            'NameOnly'   => '🎯 `direct`',
-            'Transitive' => '🔗 `transitive`',
+            'NameOnly'   => '🎯 direct',
+            'Transitive' => '🔗 transitive',
             default      => '·',
         };
     }
 
-    private static function formatBlastName(array $ep, string $kind): string
+    private static function formatName(?array $extra, string $fallback): string
     {
-        $extra = $ep['extra'] ?? null;
         if (is_array($extra) && isset($extra['path'])) {
             $methods = isset($extra['methods']) && is_array($extra['methods'])
                 ? implode('|', $extra['methods'])
                 : '';
             return $methods !== ''
-                ? sprintf('`%s %s`', $methods, $extra['path'])
-                : sprintf('`%s`', $extra['path']);
+                ? sprintf('%s %s', $methods, $extra['path'])
+                : (string) $extra['path'];
         }
-        return sprintf('`%s`', $ep['name'] ?? '?');
+        return $fallback;
     }
 
-    private static function formatListName(array $ep, string $kind): string
-    {
-        $extra = $ep['extra'] ?? null;
-        if (is_array($extra) && isset($extra['path'])) {
-            $methods = isset($extra['methods']) && is_array($extra['methods'])
-                ? implode('|', $extra['methods'])
-                : '';
-            return $methods !== ''
-                ? sprintf('`%s %s`', $methods, $extra['path'])
-                : sprintf('`%s`', $extra['path']);
-        }
-        return sprintf('`%s`', $ep['name'] ?? '?');
-    }
-
-    private static function formatHandlerCell(string $fqn, string $path, int $line): string
+    private static function formatHandler(string $fqn, string $path, int $line): string
     {
         if ($path === '') {
-            return sprintf('`%s`', $fqn);
+            return $fqn;
         }
-        return sprintf('`%s` <br/> <sub>`%s:%d`</sub>', $fqn, $path, $line);
+        return sprintf("%s\n%s:%d", $fqn, $path, $line);
     }
 
     /** @param list<array<string,mixed>> $lines */

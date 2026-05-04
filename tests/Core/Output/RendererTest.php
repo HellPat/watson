@@ -35,24 +35,31 @@ final class RendererTest extends TestCase
         $this->assertLessThan($commandPos, $routePos);
     }
 
-    public function testMarkdownRendersTableWithIconsAndReachBadge(): void
+    public function testMarkdownRendersFencedSymfonyTableWithIconsAndReachBadge(): void
     {
         $envelope = self::sampleBlastradiusEnvelope();
         $envelope = self::withConfidence($envelope, ['NameOnly', 'Transitive']);
         $out = Renderer::render(Renderer::FORMAT_MD, $envelope);
 
-        // GFM table header for each kind.
-        $this->assertStringContainsString('| reach | name | handler |', $out);
-        $this->assertStringContainsString('|---|---|---|', $out);
-        // Kind icon next to the kind label.
+        // Each kind block is wrapped in a fenced code block.
+        $this->assertStringContainsString("```text\n", $out);
+        // Symfony Table column headers (from box-style render).
+        $this->assertStringContainsString('reach', $out);
+        $this->assertStringContainsString('name', $out);
+        $this->assertStringContainsString('handler', $out);
+        // UTF-8 box-drawing characters from our table style.
+        $this->assertStringContainsString('┌', $out);
+        $this->assertStringContainsString('│', $out);
+        $this->assertStringContainsString('└', $out);
+        // Kind icons next to the kind label.
         $this->assertStringContainsString('🛣️', $out);
         $this->assertStringContainsString('⌨️', $out);
-        // Reach badges.
-        $this->assertStringContainsString('🎯 `direct`', $out);
-        $this->assertStringContainsString('🔗 `transitive`', $out);
-        // Handler cell formatted as `fqn` and `path:line`.
-        $this->assertStringContainsString('`App\\HomeController::index`', $out);
-        $this->assertStringContainsString('`src/HomeController.php:8`', $out);
+        // Reach badges (no backticks inside table cells).
+        $this->assertStringContainsString('🎯 direct', $out);
+        $this->assertStringContainsString('🔗 transitive', $out);
+        // Handler FQN + path:line on adjacent lines inside the cell.
+        $this->assertStringContainsString('App\\HomeController::index', $out);
+        $this->assertStringContainsString('src/HomeController.php:8', $out);
     }
 
     public function testTextRendersSummaryAndCounts(): void
