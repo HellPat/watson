@@ -160,11 +160,15 @@ final class TransitiveReach
                 continue;
             }
             $d = $depth[$file] ?? 0;
-            $edges = self::resolveOutgoingEdges($file, $classLoader, $parser, $rootReal, $vendorReal, $fqnCache);
-            $forward[$file] = $edges;
             if ($d >= $maxDepth) {
+                // Beyond the depth cap we still record the file but with
+                // an empty edge list, so the reverse closure can't walk
+                // through it into unrelated subsystems.
+                $forward[$file] = [];
                 continue;
             }
+            $edges = self::resolveOutgoingEdges($file, $classLoader, $parser, $rootReal, $vendorReal, $fqnCache);
+            $forward[$file] = $edges;
             foreach ($edges as $next) {
                 if (!isset($forward[$next]) && !isset($depth[$next])) {
                     $depth[$next] = $d + 1;
