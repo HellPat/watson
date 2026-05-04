@@ -1,6 +1,6 @@
 # watson
 
-> PR blast-radius analyzer for PHP. Standalone dev-only CLI that introspects Symfony / Laravel apps from the outside. Reports which routes, commands, jobs, listeners, and tests a git diff actually reaches.
+> PR blast-radius analyzer for PHP. Standalone dev-only CLI that introspects Symfony / Laravel apps from the outside. Reports which routes, commands, jobs, listeners, and tests a diff actually reaches.
 
 [![ci](https://github.com/HellPat/watson/actions/workflows/ci.yml/badge.svg)](https://github.com/HellPat/watson/actions/workflows/ci.yml)
 [![packagist](https://img.shields.io/packagist/v/hellpat/watson.svg)](https://packagist.org/packages/hellpat/watson)
@@ -8,88 +8,87 @@
 
 ```bash
 composer require --dev hellpat/watson
-vendor/bin/watson blastradius origin/main...HEAD --format=md
+git diff --name-only origin/main...HEAD | vendor/bin/watson blastradius --format=md
 ```
+
+watson does not shell out to git. You pipe a file list (or a unified diff) in, watson tells you which framework entry points are reached. Works with `git diff`, `svn diff`, GitHub-Action diff payloads, or a hand-curated list.
 
 ---
 
-## LLM-pipe recipes
+## Recipes
 
-watson's markdown / JSON envelope drops straight into any LLM CLI. Each recipe pipes the `blastradius` (or `list-entrypoints`) envelope into a focused review prompt.
+Each block below is a description followed by the command. All examples assume `composer require --dev hellpat/watson` is done.
 
-### Auto-review focused on what changed
+### Pre-merge — review prompts piped to an LLM
 
 ```bash
-vendor/bin/watson blastradius origin/main...HEAD --format=md | llm \
+# 1. Auto-review focused only on what changed
+#    LLM is told the affected entry points; flags risky areas.
+git diff --name-only origin/main...HEAD | vendor/bin/watson blastradius --format=md | llm \
   --system "Review this PR. Focus only on the affected entry points listed below.
 Flag anything risky around auth, money handling, or user-visible behaviour."
-```
 
-### Generate a manual testing guide
 
-```bash
-vendor/bin/watson blastradius origin/main...HEAD --format=md | llm \
+# 2. Generate a manual testing guide
+#    Turns the blast radius into a concrete click-through checklist for QA.
+git diff --name-only origin/main...HEAD | vendor/bin/watson blastradius --format=md | llm \
   --system "You are a senior dev. Given these affected entry points, write a
 concise manual testing guide: list the scenarios a reviewer must click through,
 the edge cases most likely to break, and any data shape that needs verifying."
-```
 
-### Coverage gap check — is the change covered by e2e / feature tests?
 
-```bash
-vendor/bin/watson blastradius origin/main...HEAD --scope=all --format=json | llm \
+# 3. Coverage gap check — is the change covered by e2e / feature tests?
+#    `--scope=all` includes phpunit.test entries so the LLM can cross-reference.
+git diff --name-only origin/main...HEAD | vendor/bin/watson blastradius --scope=all --format=json | llm \
   --system "The JSON contains affected entry points (routes / commands / jobs /
 listeners) AND every phpunit.test in the repo. Cross-reference: which affected
 entry points have at least one test that exercises them, and which don't?
 Output a markdown table; flag gaps as 'NEEDS COVERAGE'."
-```
 
-### Tight CI loop — routes only
 
-```bash
-vendor/bin/watson blastradius origin/main...HEAD --scope=routes --format=md | llm \
+# 4. Tight CI loop — routes only, one-line summary
+#    `--scope=routes` skips the AST scans for jobs/listeners/tests.
+git diff --name-only origin/main...HEAD | vendor/bin/watson blastradius --scope=routes --format=md | llm \
   --system "Summarise which user-facing routes change in this PR. One line each."
-```
 
-### Risk-rank the change
 
-```bash
-vendor/bin/watson blastradius origin/main...HEAD --format=md | llm \
+# 5. Risk-rank the change
+#    Same input as (1), different rubric.
+git diff --name-only origin/main...HEAD | vendor/bin/watson blastradius --format=md | llm \
   --system "Rate this PR's risk (low / med / high) and explain in 3 bullets.
 Consider: blast radius across kinds, whether async paths (jobs / listeners)
 are involved, whether a test exists for every affected route."
 ```
 
----
+### Post-release — observability MCP correlation
 
-## Post-release recipes
-
-After a deploy, pipe the **just-shipped** entry points into an LLM that has observability MCP servers wired up — e.g. [Better Stack MCP](https://betterstack.com/docs/getting-started/integrations/mcp/) (`claude mcp add betterstack --transport http https://mcp.betterstack.com`). The LLM gets the surface that changed *and* live metrics — it can correlate the two.
-
-### Latency regression on routes that changed in the last release
+After a deploy, pipe the **just-shipped** entry points into an LLM that has an observability MCP server wired up — e.g. [Better Stack MCP](https://betterstack.com/docs/getting-started/integrations/mcp/) (`claude mcp add betterstack --transport http https://mcp.betterstack.com`). The LLM gets the surface that changed *and* live metrics — it can correlate the two without you copy-pasting route names into a dashboard.
 
 ```bash
-vendor/bin/watson blastradius v1.4.0..v1.5.0 --scope=routes --format=md | llm \
+# 1. Latency regression on routes that shipped in the last release
+#    Diffs two release tags so you only ask about routes that actually changed.
+git diff --name-only v1.4.0..v1.5.0 | vendor/bin/watson blastradius --scope=routes --format=md \
+  --base=v1.4.0 --head=v1.5.0 | llm \
   --system "These routes shipped in v1.5.0. Use Better Stack MCP:
 for each route, query p50 / p95 latency since the deploy timestamp
 and compare to the previous 24h baseline. Flag any route whose p95
 grew >20% or whose error rate doubled."
-```
 
-### Error rate / exception regression after deploy
 
-```bash
-vendor/bin/watson blastradius v1.4.0..v1.5.0 --format=md | llm \
+# 2. Error / exception regression after deploy
+#    Wider scope so jobs and listeners are also checked for new exceptions.
+git diff --name-only v1.4.0..v1.5.0 | vendor/bin/watson blastradius --format=md \
+  --base=v1.4.0 --head=v1.5.0 | llm \
   --system "These entry points (routes / commands / jobs / listeners)
 shipped in v1.5.0. Use Better Stack MCP error tracking to:
 - list new exception classes seen on any affected handler since deploy,
 - count occurrences vs the prior 24h,
 - group by handler FQN and rank by impact."
-```
 
-### Open incidents touching the changed surface
 
-```bash
+# 3. Open incidents touching the changed surface
+#    Uses list-entrypoints (the full registry) since incidents may not align
+#    with a specific release window.
 vendor/bin/watson list-entrypoints --scope=routes --format=md | llm \
   --system "Use Better Stack MCP to list all currently-open incidents.
 For each incident, identify which (if any) of the entry points below
@@ -103,13 +102,11 @@ entry point with a one-line summary."
 
 ```bash
 composer require --dev hellpat/watson
-vendor/bin/watson list-entrypoints
-vendor/bin/watson blastradius origin/main...HEAD --format=md
 ```
 
 No bundle, no service provider, no `config/bundles.php` entry. watson auto-detects Symfony vs Laravel by walking up from CWD looking for `bin/console` or `artisan`.
 
-**Requirements:** PHP 8.4+, git on `$PATH`. Symfony 6.4 / 7.x / 8.x or Laravel 10 / 11 / 12.
+**Requirements:** PHP 8.4+. Symfony 6.4 / 7.x / 8.x or Laravel 10 / 11 / 12. `git` is *not* a watson dependency — watson only reads the diff you pipe in. If your diff source is git, you'll have it for that reason.
 
 ---
 
@@ -117,17 +114,20 @@ No bundle, no service provider, no `config/bundles.php` entry. watson auto-detec
 
 ### `watson blastradius`
 
-| invocation                       | meaning                          |
-| ---                              | ---                              |
-| `watson blastradius`             | working tree vs HEAD             |
-| `watson blastradius --cached`    | staged index vs HEAD             |
-| `watson blastradius <rev>`       | working tree vs `<rev>`          |
-| `watson blastradius <a>..<b>`    | `<a>` vs `<b>`                   |
-| `watson blastradius <a>...<b>`   | merge-base(`<a>`,`<b>`) vs `<b>` — matches GitHub's "Files changed" view |
+Reads a list of changed files from stdin (or `--files=`) and reports which entry points reach them. watson does not run git; the caller is responsible for picking the diff source.
+
+| input shape                                                              | when to use                                                            |
+| ---                                                                      | ---                                                                    |
+| `git diff --name-only <a>...<b> \| watson blastradius`                    | most common — pipe `git diff --name-only` output as one path per line  |
+| `git diff <a>...<b> \| watson blastradius --unified-diff`                 | full unified diff on stdin; watson extracts post-image filenames       |
+| `watson blastradius --files=path/a --files=path/b`                       | no git involved — pre-computed list, GitHub-Action payload, etc.       |
+| `git diff --cached --name-only \| watson blastradius`                     | staged-only review — `--cached` lives on the caller's `git`, not watson |
+
+When run in an interactive shell with no input piped and no `--files`, watson exits with a usage hint instead of silently producing zero results.
 
 ### `watson list-entrypoints`
 
-Snapshot every entry point the framework registered.
+Snapshot every entry point the framework registered. Same options as `blastradius`, minus the diff-input flags.
 
 ### `watson <cmd> --help`
 
@@ -135,23 +135,24 @@ Snapshot every entry point the framework registered.
 $ watson blastradius --help
 
 Description:
-  Report which routes, commands, jobs, and listeners are reached by a git diff.
+  Report which routes, commands, jobs, and listeners are reached by a list
+  of changed files (read from stdin, or --files=).
 
 Usage:
-  blastradius [options] [--] [<revisions>...]
-
-Arguments:
-  revisions              Git diff revisions: <rev>, <a> <b>, <a>..<b>, or <a>...<b> (merge-base).
-                         Empty = working tree vs HEAD.
+  blastradius [options]
 
 Options:
-      --cached           Diff staged index vs HEAD instead of working tree
+      --files=FILES      Explicit file path (repeatable, or comma-separated).
+                         Bypasses stdin. (multiple values allowed)
+      --unified-diff     Parse stdin as a unified diff (e.g. `git diff …`) instead
+                         of a newline-separated path list.
+      --base=BASE        Cosmetic label shown as the diff base in rendered output
+      --head=HEAD        Cosmetic label shown as the diff head in rendered output
       --project=PROJECT  Project root (defaults to walking up from CWD)
-      --format=FORMAT    Output format: text (human terminal), md (markdown for PRs/LLMs),
-                         json (machine), tok (tab-separated, token-optimized for LLM pipes)
-                         [default: "text"]
-      --scope=SCOPE      routes (cheapest, runtime registry only) or all
-                         (adds commands / jobs / listeners / tests) [default: "all"]
+      --format=FORMAT    text (human terminal) | md (PRs/LLMs) | json (machine)
+                         | tok (token-optimized for LLM pipes) [default: "text"]
+      --scope=SCOPE      routes (cheapest) | all (+ commands / jobs / listeners
+                         / tests) [default: "all"]
       --app-env=APP-ENV  APP_ENV passed to bin/console / artisan [default: "dev"]
 ```
 
@@ -159,18 +160,18 @@ Options:
 $ watson list-entrypoints --help
 
 Description:
-  Snapshot every route, command, job, listener, and test the framework has registered.
+  Snapshot every route, command, job, listener, and test the framework has
+  registered.
 
 Usage:
   list-entrypoints [options]
 
 Options:
       --project=PROJECT  Project root (defaults to walking up from CWD)
-      --format=FORMAT    Output format: text (human terminal), md (markdown for PRs/LLMs),
-                         json (machine), tok (tab-separated, token-optimized for LLM pipes)
-                         [default: "text"]
-      --scope=SCOPE      routes (cheapest, runtime registry only) or all
-                         (adds commands / jobs / listeners / tests) [default: "all"]
+      --format=FORMAT    text (human terminal) | md (PRs/LLMs) | json (machine)
+                         | tok (token-optimized for LLM pipes) [default: "text"]
+      --scope=SCOPE      routes (cheapest) | all (+ commands / jobs / listeners
+                         / tests) [default: "all"]
       --app-env=APP-ENV  APP_ENV passed to bin/console / artisan [default: "dev"]
 ```
 
@@ -195,15 +196,15 @@ Per-row layout: `kind \t name \t handler_fqn \t relative/path:line \t extra` (ex
 
 ## How watson reads your app
 
-| kind                          | source                                                                                  |
-| ---                           | ---                                                                                     |
-| `symfony.route`               | `bin/console debug:router --format=json`                                                |
-| `symfony.command`             | `bin/console debug:container --tag=console.command --format=json` (vendor filtered)     |
-| `laravel.route`               | `php artisan route:list --json`                                                         |
-| `laravel.command`             | inline `php -r` runner that boots Laravel and dumps `Artisan::all()` (vendor filtered)  |
-| `laravel.job`                 | AST scan of `app/Jobs/` for `ShouldQueue` implementers                                  |
-| `laravel.listener`            | AST scan of `app/Listeners/` for `handle()` / `__invoke()`                              |
-| `phpunit.test`                | AST scan of `tests/` for `PHPUnit\Framework\TestCase` subclasses                        |
+| kind                | source                                                                                  |
+| ---                 | ---                                                                                     |
+| `symfony.route`     | `bin/console debug:router --format=json`                                                |
+| `symfony.command`   | `bin/console debug:container --tag=console.command --format=json` (vendor filtered)     |
+| `laravel.route`     | `php artisan route:list --json`                                                         |
+| `laravel.command`   | inline `php -r` runner that boots Laravel and dumps `Artisan::all()` (vendor filtered)  |
+| `laravel.job`       | AST scan of `app/Jobs/` for `ShouldQueue` implementers                                  |
+| `laravel.listener`  | AST scan of `app/Listeners/` for `handle()` / `__invoke()`                              |
+| `phpunit.test`      | AST scan of `tests/` for `PHPUnit\Framework\TestCase` subclasses                        |
 
 watson is a CLI binary, not a bundle/provider. AST scans go through [`roave/better-reflection`](https://github.com/Roave/BetterReflection) — watson never `require_once`s your app's source.
 

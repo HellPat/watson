@@ -4,18 +4,17 @@ declare(strict_types=1);
 
 namespace Watson\Core\Analysis;
 
-use Watson\Core\Diff\DiffSpec;
-use Watson\Core\Diff\GitDiff;
 use Watson\Core\Entrypoint\EntryPoint;
 use Watson\Core\Output\Envelope;
 use Watson\Core\Reach\FileLevelReach;
 
 /**
  * Build a blastradius analysis result from a list of runtime entry points
- * and a resolved `DiffSpec`. Pure function on top of the file-level reach
- * algorithm — the entry-point list is supplied by the caller (Laravel
- * adapter pulls it from the router; Symfony adapter from
- * `RouterInterface`).
+ * and a list of changed files. Pure function on top of the file-level
+ * reach algorithm — both inputs are supplied by the caller (the entry-
+ * point list comes from the framework adapters; the changed-files list
+ * comes from `Watson\Core\Diff\ChangedFilesReader`, which reads stdin or
+ * `--files`). watson does not shell out to git.
  */
 final class Blastradius
 {
@@ -24,16 +23,14 @@ final class Blastradius
 
     /**
      * @param list<EntryPoint> $entryPoints
+     * @param list<string>     $changedFiles absolute paths
      */
     public static function run(
         Envelope $envelope,
-        string $repoPath,
-        DiffSpec $spec,
+        string $projectRoot,
+        array $changedFiles,
         array $entryPoints,
     ): void {
-        $spec->assertHeadMatchesWorkingTree($repoPath);
-
-        $changedFiles = GitDiff::changedFiles($repoPath, $spec);
         $affectedIndices = FileLevelReach::affectedIndices($entryPoints, $changedFiles);
 
         $affected = [];
@@ -44,7 +41,7 @@ final class Blastradius
                 'name' => $ep->name,
                 'handler' => [
                     'fqn' => $ep->handlerFqn,
-                    'path' => self::relativise($ep->handlerPath, $repoPath),
+                    'path' => self::relativise($ep->handlerPath, $projectRoot),
                     'line' => $ep->handlerLine,
                 ],
                 'extra' => $ep->extra ?? null,

@@ -211,6 +211,15 @@ final class WatsonContext implements Context
     #[When('/^I run "watson ([^"]+)" against the working-tree diff$/')]
     public function runWatsonBlastradius(string $command): void
     {
+        // watson no longer shells git itself — capture the diff name-only
+        // list externally, pipe it into watson via stdin.
+        // `--relative` makes git emit paths relative to the fixture dir
+        // (not the watson repo's git toplevel), matching the project root
+        // watson resolves against.
+        $diff = new Process(['git', 'diff', '--name-only', '--relative', $this->baseSha], $this->fixturePath);
+        $diff->mustRun();
+        $changedFiles = $diff->getOutput();
+
         // --scope=routes keeps the assertion meaningful when the watson
         // repo and fixture share the same git tree: a wider scope would
         // pull in the package files themselves into the affected set.
@@ -220,12 +229,12 @@ final class WatsonContext implements Context
             'display_errors=stderr',
             self::watsonBin(),
             ...self::splitCommand($command),
-            $this->baseSha,
             '--project=' . $this->fixturePath,
             '--format=json',
             '--scope=routes',
         ];
-        $process = new Process($argv, dirname(__DIR__, 2));
+        $process = new Process($argv, $this->fixturePath);
+        $process->setInput($changedFiles);
         $this->run($process);
     }
 
