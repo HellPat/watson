@@ -33,8 +33,11 @@ final class StaticReflector
     public function __construct(string $projectRoot)
     {
         $this->br = new BetterReflection();
+        // Some packages (e.g. kylekatarnls/carbonite) declare an empty PSR-4
+        // prefix mapping which BetterReflection's factory rejects outright.
+        // ComposerProjectStaging strips those entries before the factory sees them.
         $composerLocator = (new MakeLocatorForComposerJsonAndInstalledJson())(
-            $projectRoot,
+            ComposerProjectStaging::prepare($projectRoot),
             $this->br->astLocator(),
         );
         // Stub PHP internals (Countable, Iterator, …) so type-resolution
