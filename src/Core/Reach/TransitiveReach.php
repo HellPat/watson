@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Watson\Core\Reach;
 
-use PhpParser\Node;
 use PhpParser\Node\Name;
 use PhpParser\NodeFinder;
 use PhpParser\NodeTraverser;
@@ -18,30 +17,30 @@ use Watson\Core\Entrypoint\EntryPoint;
  * checks whether the entry point's own handler file is in the diff, this
  * pass walks every class referenced from the handler — `use` imports,
  * `new X()`, `X::method()`, `X::class`, `extends`, `implements`, type
- * hints — and intersects the resulting closure of project files with the
- * diff. Any reached file in the diff marks the entry point as affected.
+ * hints — and marks the entry point as affected when its closure of
+ * project files intersects the diff.
  *
- * Vendor and out-of-project files are pruned at the BFS frontier, so a
- * service edit (e.g. `App\Plu\Services\ProductService::userVisible…`)
- * still surfaces every queued job, route handler, or command that calls
- * into that service.
+ * Algorithm:
+ * 1. Forward graph — BFS from every entry-point handler file, parsing
+ *    each visited project file once. Edges are project-internal class
+ *    references (vendor / out-of-project files are pruned at the
+ *    frontier). Each unique file is parsed at most once per run.
+ * 2. Reverse BFS from the changed files — gives the set of project
+ *    files that *transitively reach* something in the diff.
+ * 3. For each entry point, hit when its handler file is in that set.
  *
- * The pass uses BetterReflection (via {@see StaticReflector}) to resolve
- * fully-qualified class names without ever loading user code, and
- * `nikic/php-parser`'s `NameResolver` to resolve unqualified names
- * against `use` statements + the surrounding namespace.
+ * Doing the two BFSes globally (instead of per entry point) keeps the
+ * cost ~O(reachable files) total rather than O(reachable files × entry
+ * points) — the practical difference between sub-second and "watson
+ * times out" on a Laravel app with hundreds of routes.
  *
- * Tradeoffs vs file-level:
- * - **Recall** is much higher: any class transitively depended on counts.
- * - **Precision** drops some — string-encoded classnames (`'App\Foo'`),
- *   container lookups (`app(Foo::class)` *is* caught — that's
- *   `Foo::class`), and deeply dynamic dispatch are best-effort.
- * - **Cost** is one parse per visited project file, capped by the
- *   `$maxVisited` ceiling.
+ * Recall is high; precision is best-effort: string-encoded class names
+ * (`'App\Foo'` as a literal) and dynamic dispatch are not chased,
+ * `Foo::class` is.
  */
 final class TransitiveReach
 {
-    private const MAX_VISITED_DEFAULT = 5000;
+    private const MAX_FILES_DEFAULT = 5000;
 
     /**
      * @param list<EntryPoint> $entryPoints
@@ -53,10 +52,9 @@ final class TransitiveReach
         array $changedFiles,
         StaticReflector $reflector,
         string $projectRoot,
-        int $maxVisited = self::MAX_VISITED_DEFAULT,
+        int $maxFiles = self::MAX_FILES_DEFAULT,
     ): array {
-        $changedSet = self::buildChangedSet($changedFiles);
-        if ($changedSet === []) {
+        if ($entryPoints === [] || $changedFiles === []) {
             return [];
         }
 
@@ -66,111 +64,143 @@ final class TransitiveReach
         }
         $vendorReal = realpath($projectRoot . '/vendor');
 
-        $parser = (new ParserFactory())->createForHostVersion();
-        $finder = new NodeFinder();
-        // Cache: absolute file path → list of project-internal absolute file
-        // paths it directly references. Built lazily during the first BFS
-        // and reused across every subsequent entry point's traversal.
-        $fileEdges = [];
-        // Cache: FQN → resolved project file abs path, or null when the
-        // class is unknown / external. Reflection lookups dominate the
-        // cost, so memoising them across files is the difference between
-        // sub-second and many-minute runs on real Laravel apps.
-        $fqnCache = [];
-
-        $hits = [];
-        foreach ($entryPoints as $idx => $ep) {
-            $reached = self::collectClosure(
-                $ep->handlerPath,
-                $reflector,
-                $parser,
-                $finder,
-                $rootReal,
-                $vendorReal,
-                $maxVisited,
-                $fileEdges,
-                $fqnCache,
-            );
-            foreach ($reached as $file) {
-                if (isset($changedSet[$file])) {
-                    $hits[] = $idx;
-                    break;
-                }
-            }
+        $changedSet = self::buildChangedSet($changedFiles);
+        if ($changedSet === []) {
+            return [];
         }
 
+        $parser = (new ParserFactory())->createForHostVersion();
+        $finder = new NodeFinder();
+
+        // Step 1: forward graph from every entry-point handler file.
+        $forward = self::buildForwardGraph(
+            self::collectSeedFiles($entryPoints, $rootReal, $vendorReal),
+            $reflector,
+            $parser,
+            $finder,
+            $rootReal,
+            $vendorReal,
+            $maxFiles,
+        );
+
+        // Step 2: invert and BFS backwards from the diff.
+        $reverse = self::invert($forward);
+        $reachable = self::reverseClosure($changedSet, $reverse);
+
+        // Step 3: mark entry points whose handler file is reachable.
+        $hits = [];
+        foreach ($entryPoints as $idx => $ep) {
+            $real = realpath($ep->handlerPath);
+            $key = $real !== false ? $real : $ep->handlerPath;
+            if (isset($reachable[$key])) {
+                $hits[] = $idx;
+            }
+        }
         return $hits;
     }
 
-    /** @param list<string> $changedFiles */
-    private static function buildChangedSet(array $changedFiles): array
+    /**
+     * @param list<EntryPoint> $entryPoints
+     * @return list<string>
+     */
+    private static function collectSeedFiles(array $entryPoints, string $rootReal, string|false $vendorReal): array
     {
-        $set = [];
-        foreach ($changedFiles as $f) {
-            if ($f === '') {
+        $seeds = [];
+        foreach ($entryPoints as $ep) {
+            if ($ep->handlerPath === '') {
                 continue;
             }
-            $real = realpath($f);
-            if ($real !== false) {
-                $set[$real] = true;
+            $real = realpath($ep->handlerPath);
+            if ($real === false) {
+                continue;
             }
-            $set[$f] = true;
+            if (!self::insideProject($real, $rootReal, $vendorReal)) {
+                continue;
+            }
+            $seeds[$real] = true;
         }
-        return $set;
+        return array_keys($seeds);
     }
 
     /**
-     * BFS the static call graph from $startFile, returning the set of
-     * project files reached. The first time a file is visited we resolve
-     * its outgoing edges (referenced project files) and cache them in
-     * `$fileEdges`; subsequent traversals reuse the edge list rather than
-     * reparsing the file.
-     *
-     * @param array<string, list<string>> $fileEdges in-out cache: file → outgoing edges
-     * @param array<string, ?string>      $fqnCache  in-out cache: FQN → resolved project file (or null when unknown)
+     * @param list<string> $seeds
+     * @return array<string, list<string>> file → outgoing edges (project-internal absolute paths)
      */
-    private static function collectClosure(
-        string $startFile,
+    private static function buildForwardGraph(
+        array $seeds,
         StaticReflector $reflector,
         \PhpParser\Parser $parser,
         NodeFinder $finder,
         string $rootReal,
         string|false $vendorReal,
-        int $maxVisited,
-        array &$fileEdges,
-        array &$fqnCache,
+        int $maxFiles,
     ): array {
-        $startReal = realpath($startFile);
-        if ($startReal === false) {
-            return [];
-        }
-        if (!self::insideProject($startReal, $rootReal, $vendorReal)) {
-            return [];
-        }
-
-        $visited = [$startReal => true];
-        $queue   = [$startReal];
+        $forward  = [];
+        $fqnCache = [];
+        $queue    = $seeds;
 
         while ($queue !== []) {
-            if (count($visited) >= $maxVisited) {
+            if (count($forward) >= $maxFiles) {
                 break;
             }
             $file = array_shift($queue);
-            $edges = $fileEdges[$file] ?? null;
-            if ($edges === null) {
-                $edges = self::resolveOutgoingEdges($file, $reflector, $parser, $finder, $rootReal, $vendorReal, $fqnCache);
-                $fileEdges[$file] = $edges;
+            if (isset($forward[$file])) {
+                continue;
             }
+            $edges = self::resolveOutgoingEdges($file, $reflector, $parser, $finder, $rootReal, $vendorReal, $fqnCache);
+            $forward[$file] = $edges;
             foreach ($edges as $next) {
-                if (isset($visited[$next])) {
-                    continue;
+                if (!isset($forward[$next])) {
+                    $queue[] = $next;
                 }
-                $visited[$next] = true;
-                $queue[] = $next;
             }
         }
+        return $forward;
+    }
 
-        return array_keys($visited);
+    /**
+     * @param array<string, list<string>> $forward
+     * @return array<string, list<string>>
+     */
+    private static function invert(array $forward): array
+    {
+        $reverse = [];
+        foreach ($forward as $src => $targets) {
+            foreach ($targets as $t) {
+                $reverse[$t][] = $src;
+            }
+        }
+        return $reverse;
+    }
+
+    /**
+     * Reverse BFS from $changedSet through $reverse. Files that don't
+     * appear in $reverse simply aren't reached from anything; that's
+     * fine — they only matter if they ARE in $changedSet themselves.
+     *
+     * @param array<string, true>          $changedSet
+     * @param array<string, list<string>>  $reverse
+     * @return array<string, true>
+     */
+    private static function reverseClosure(array $changedSet, array $reverse): array
+    {
+        $reached = [];
+        $queue   = [];
+        foreach ($changedSet as $f => $_) {
+            $reached[$f] = true;
+            $queue[]     = $f;
+        }
+        while ($queue !== []) {
+            $f       = array_shift($queue);
+            $callers = $reverse[$f] ?? [];
+            foreach ($callers as $caller) {
+                if (!isset($reached[$caller])) {
+                    $reached[$caller] = true;
+                    $queue[]          = $caller;
+                }
+            }
+        }
+        return $reached;
     }
 
     /**
@@ -178,7 +208,7 @@ final class TransitiveReach
      * file it references via class names. Vendor + out-of-project files
      * are pruned here so the cached edge list stays project-scoped.
      *
-     * @param array<string, ?string> $fqnCache
+     * @param array<string, ?string> $fqnCache in-out: FQN → resolved project file (or null when external/unknown)
      * @return list<string>
      */
     private static function resolveOutgoingEdges(
@@ -206,7 +236,7 @@ final class TransitiveReach
         $resolved = self::resolveNames($ast);
         $names    = $finder->findInstanceOf($resolved, Name::class);
 
-        $edges = [];
+        $edges    = [];
         $seenFqns = [];
         foreach ($names as $name) {
             /** @var Name $name */
@@ -225,7 +255,7 @@ final class TransitiveReach
             }
 
             $resolvedFile = null;
-            $class = $reflector->reflectClass($fqn);
+            $class        = $reflector->reflectClass($fqn);
             if ($class !== null) {
                 $classFileName = $class->getFileName();
                 if (is_string($classFileName) && $classFileName !== '') {
@@ -243,24 +273,13 @@ final class TransitiveReach
         return array_keys($edges);
     }
 
-    private static function isReservedName(string $fqn): bool
-    {
-        return in_array(
-            $fqn,
-            ['self', 'static', 'parent', 'true', 'false', 'null',
-             'mixed', 'void', 'never', 'iterable', 'callable',
-             'object', 'array', 'int', 'string', 'float', 'bool'],
-            true,
-        );
-    }
-
     /**
      * Resolve unqualified class names against `use` statements + the
      * enclosing namespace so subsequent `Name` nodes carry an absolute
      * FQN we can reflect on.
      *
-     * @param list<Node> $ast
-     * @return list<Node>
+     * @param list<\PhpParser\Node> $ast
+     * @return list<\PhpParser\Node>
      */
     private static function resolveNames(array $ast): array
     {
@@ -270,6 +289,23 @@ final class TransitiveReach
             ['preserveOriginalNames' => false, 'replaceNodes' => true],
         ));
         return $traverser->traverse($ast);
+    }
+
+    /** @return array<string, true> */
+    private static function buildChangedSet(array $changedFiles): array
+    {
+        $set = [];
+        foreach ($changedFiles as $f) {
+            if ($f === '') {
+                continue;
+            }
+            $real = realpath($f);
+            if ($real !== false) {
+                $set[$real] = true;
+            }
+            $set[$f] = true;
+        }
+        return $set;
     }
 
     private static function insideProject(string $absPath, string $rootReal, string|false $vendorReal): bool
@@ -285,5 +321,16 @@ final class TransitiveReach
             }
         }
         return true;
+    }
+
+    private static function isReservedName(string $fqn): bool
+    {
+        return in_array(
+            $fqn,
+            ['self', 'static', 'parent', 'true', 'false', 'null',
+             'mixed', 'void', 'never', 'iterable', 'callable',
+             'object', 'array', 'int', 'string', 'float', 'bool'],
+            true,
+        );
     }
 }
