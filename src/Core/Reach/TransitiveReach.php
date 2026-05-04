@@ -72,6 +72,11 @@ final class TransitiveReach
         // paths it directly references. Built lazily during the first BFS
         // and reused across every subsequent entry point's traversal.
         $fileEdges = [];
+        // Cache: FQN → resolved project file abs path, or null when the
+        // class is unknown / external. Reflection lookups dominate the
+        // cost, so memoising them across files is the difference between
+        // sub-second and many-minute runs on real Laravel apps.
+        $fqnCache = [];
 
         $hits = [];
         foreach ($entryPoints as $idx => $ep) {
@@ -84,6 +89,7 @@ final class TransitiveReach
                 $vendorReal,
                 $maxVisited,
                 $fileEdges,
+                $fqnCache,
             );
             foreach ($reached as $file) {
                 if (isset($changedSet[$file])) {
@@ -121,6 +127,7 @@ final class TransitiveReach
      * reparsing the file.
      *
      * @param array<string, list<string>> $fileEdges in-out cache: file → outgoing edges
+     * @param array<string, ?string>      $fqnCache  in-out cache: FQN → resolved project file (or null when unknown)
      */
     private static function collectClosure(
         string $startFile,
@@ -131,6 +138,7 @@ final class TransitiveReach
         string|false $vendorReal,
         int $maxVisited,
         array &$fileEdges,
+        array &$fqnCache,
     ): array {
         $startReal = realpath($startFile);
         if ($startReal === false) {
@@ -150,7 +158,7 @@ final class TransitiveReach
             $file = array_shift($queue);
             $edges = $fileEdges[$file] ?? null;
             if ($edges === null) {
-                $edges = self::resolveOutgoingEdges($file, $reflector, $parser, $finder, $rootReal, $vendorReal);
+                $edges = self::resolveOutgoingEdges($file, $reflector, $parser, $finder, $rootReal, $vendorReal, $fqnCache);
                 $fileEdges[$file] = $edges;
             }
             foreach ($edges as $next) {
@@ -170,6 +178,7 @@ final class TransitiveReach
      * file it references via class names. Vendor + out-of-project files
      * are pruned here so the cached edge list stays project-scoped.
      *
+     * @param array<string, ?string> $fqnCache
      * @return list<string>
      */
     private static function resolveOutgoingEdges(
@@ -179,6 +188,7 @@ final class TransitiveReach
         NodeFinder $finder,
         string $rootReal,
         string|false $vendorReal,
+        array &$fqnCache,
     ): array {
         $code = @file_get_contents($file);
         if (!is_string($code)) {
@@ -205,19 +215,30 @@ final class TransitiveReach
                 continue;
             }
             $seenFqns[$fqn] = true;
+
+            if (array_key_exists($fqn, $fqnCache)) {
+                $cached = $fqnCache[$fqn];
+                if ($cached !== null) {
+                    $edges[$cached] = true;
+                }
+                continue;
+            }
+
+            $resolvedFile = null;
             $class = $reflector->reflectClass($fqn);
-            if ($class === null) {
-                continue;
+            if ($class !== null) {
+                $classFileName = $class->getFileName();
+                if (is_string($classFileName) && $classFileName !== '') {
+                    $classReal = realpath($classFileName);
+                    if ($classReal !== false && self::insideProject($classReal, $rootReal, $vendorReal)) {
+                        $resolvedFile = $classReal;
+                    }
+                }
             }
-            $classFileName = $class->getFileName();
-            if ($classFileName === null || $classFileName === '') {
-                continue;
+            $fqnCache[$fqn] = $resolvedFile;
+            if ($resolvedFile !== null) {
+                $edges[$resolvedFile] = true;
             }
-            $classReal = realpath($classFileName);
-            if ($classReal === false || !self::insideProject($classReal, $rootReal, $vendorReal)) {
-                continue;
-            }
-            $edges[$classReal] = true;
         }
         return array_keys($edges);
     }
