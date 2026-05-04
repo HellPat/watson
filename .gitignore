@@ -1,6 +1,7 @@
 /target
 /vendor
 /legacy-rust/target
+/.claude
 
 # composer
 composer.lock

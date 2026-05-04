@@ -12,10 +12,9 @@ use Behat\Step\When;
 use Symfony\Component\Process\Process;
 
 /**
- * Behat step definitions. Each scenario boots the relevant fixture app's
- * console and shells the watson command exposed via auto-discovery /
- * bundle registration. We assert against the JSON envelope on stdout —
- * that's the same JSON LLM consumers will read.
+ * Behat step definitions. Each scenario invokes the standalone watson CLI
+ * (`bin/watson`) against a fixture project root. We assert against the
+ * JSON envelope on stdout — that's the same JSON LLM consumers will read.
  */
 final class WatsonContext implements Context
 {
@@ -24,6 +23,11 @@ final class WatsonContext implements Context
     /** @var array<string,string> relative path => original contents */
     private array $touchedFiles = [];
     private string $baseSha = '';
+
+    private static function watsonBin(): string
+    {
+        return dirname(__DIR__, 2) . '/bin/watson';
+    }
 
     #[Given('the Laravel fixture')]
     public function laravelFixture(): void
@@ -47,21 +51,21 @@ final class WatsonContext implements Context
         $this->fixturePath = $root;
     }
 
-    #[When('/^I run "([^"]+)" via artisan$/')]
-    public function runArtisan(string $command): void
+    #[When('/^I run "watson ([^"]+)"$/')]
+    public function runWatson(string $command): void
     {
         // -d display_errors=stderr keeps PHP's own deprecation notices out
         // of stdout so the watson JSON is the only thing on the channel.
-        $argv = ['php', '-d', 'display_errors=stderr', 'artisan', ...self::splitCommand($command), '--format=json'];
-        $process = new Process($argv, $this->fixturePath);
-        $this->run($process);
-    }
-
-    #[When('/^I run "([^"]+)" via bin\/console$/')]
-    public function runBinConsole(string $command): void
-    {
-        $argv = ['php', '-d', 'display_errors=stderr', 'bin/console', ...self::splitCommand($command), '--format=json'];
-        $process = new Process($argv, $this->fixturePath);
+        $argv = [
+            'php',
+            '-d',
+            'display_errors=stderr',
+            self::watsonBin(),
+            ...self::splitCommand($command),
+            '--project=' . $this->fixturePath,
+            '--format=json',
+        ];
+        $process = new Process($argv, dirname(__DIR__, 2));
         $this->run($process);
     }
 
@@ -204,26 +208,24 @@ final class WatsonContext implements Context
         }
     }
 
-    #[When('/^I run "([^"]+)" against the working-tree diff via artisan$/')]
-    public function runArtisanBlastradius(string $command): void
+    #[When('/^I run "watson ([^"]+)" against the working-tree diff$/')]
+    public function runWatsonBlastradius(string $command): void
     {
         // --scope=routes keeps the assertion meaningful when the watson
         // repo and fixture share the same git tree: a wider scope would
         // pull in the package files themselves into the affected set.
-        $process = new Process(
-            ['php', '-d', 'display_errors=stderr', 'artisan', $command, $this->baseSha, '--format=json', '--scope=routes'],
-            $this->fixturePath,
-        );
-        $this->run($process);
-    }
-
-    #[When('/^I run "([^"]+)" against the working-tree diff via bin\/console$/')]
-    public function runBinConsoleBlastradius(string $command): void
-    {
-        $process = new Process(
-            ['php', '-d', 'display_errors=stderr', 'bin/console', $command, $this->baseSha, '--format=json', '--scope=routes'],
-            $this->fixturePath,
-        );
+        $argv = [
+            'php',
+            '-d',
+            'display_errors=stderr',
+            self::watsonBin(),
+            ...self::splitCommand($command),
+            $this->baseSha,
+            '--project=' . $this->fixturePath,
+            '--format=json',
+            '--scope=routes',
+        ];
+        $process = new Process($argv, dirname(__DIR__, 2));
         $this->run($process);
     }
 

@@ -12,8 +12,10 @@ use Symfony\Component\Routing\Loader\Configurator\RoutingConfigurator;
 
 /**
  * Single-file Symfony kernel — minimum needed for the router + console
- * subsystems so watson:list-entrypoints and watson:blastradius have something
- * real to talk to.
+ * subsystems so watson (running as a standalone CLI) has something real
+ * to introspect via `bin/console debug:router`.
+ *
+ * No watson bundle is registered — watson is purely outside-in now.
  */
 final class Kernel extends BaseKernel
 {
@@ -23,7 +25,6 @@ final class Kernel extends BaseKernel
     {
         return [
             new \Symfony\Bundle\FrameworkBundle\FrameworkBundle(),
-            new \Watson\Symfony\WatsonBundle(),
         ];
     }
 
@@ -47,22 +48,6 @@ final class Kernel extends BaseKernel
             'php_errors' => ['log' => true],
             'test' => false,
         ]);
-
-        // watson commands — autowire pulls RouterInterface;
-        // %kernel.project_dir% for the scalar arg.
-        $container->services()
-            ->set(\Watson\Symfony\Console\ListEntrypointsCommand::class)
-            ->autowire()
-            ->autoconfigure()
-            ->arg('$projectDir', '%kernel.project_dir%')
-            ->tag('console.command');
-
-        $container->services()
-            ->set(\Watson\Symfony\Console\BlastradiusCommand::class)
-            ->autowire()
-            ->autoconfigure()
-            ->arg('$projectDir', '%kernel.project_dir%')
-            ->tag('console.command');
 
         // Fixture user-side command — proves watson picks up app:ping in
         // its list-entrypoints output via Application::all().

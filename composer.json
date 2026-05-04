@@ -1,6 +1,6 @@
 {
     "name": "hellpat/watson",
-    "description": "PR blast-radius analyser for PHP. Drop-in Composer dev-dep. Reports which routes / commands / jobs / listeners / tests a git diff reaches. One package, both Laravel and Symfony.",
+    "description": "PR blast-radius analyser for PHP. Standalone dev-only CLI that introspects Symfony / Laravel apps from the outside. Reports which routes / commands / jobs / listeners / tests a git diff reaches.",
     "type": "library",
     "license": "MIT",
     "keywords": ["pr", "review", "diff", "blast-radius", "ai-review", "code-review", "laravel", "symfony", "artisan", "console"],
@@ -12,25 +12,17 @@
         "issues": "https://github.com/HellPat/watson/issues",
         "source": "https://github.com/HellPat/watson"
     },
+    "bin": ["bin/watson"],
     "require": {
         "php": "^8.4",
         "ext-json": "*",
+        "roave/better-reflection": "^6.0",
         "symfony/console": "^6.4|^7.0|^8.0",
         "symfony/process": "^6.4|^7.0|^8.0"
     },
     "require-dev": {
         "behat/behat": "^3.14",
-        "phpunit/phpunit": "^11.0",
-        "illuminate/console": "^10.0|^11.0|^12.0",
-        "illuminate/contracts": "^10.0|^11.0|^12.0",
-        "illuminate/routing": "^10.0|^11.0|^12.0",
-        "illuminate/support": "^10.0|^11.0|^12.0",
-        "symfony/framework-bundle": "^6.4|^7.0|^8.0",
-        "symfony/routing": "^6.4|^7.0|^8.0"
-    },
-    "suggest": {
-        "illuminate/support": "Required when using on Laravel — auto-registers the watson:* Artisan commands.",
-        "symfony/framework-bundle": "Required when using on Symfony — register Watson\\Symfony\\WatsonBundle in config/bundles.php."
+        "phpunit/phpunit": "^11.0"
     },
     "autoload": {
         "psr-4": { "Watson\\": "src/" }
@@ -43,12 +35,7 @@
     },
     "extra": {
         "branch-alias": {
-            "dev-main": "0.3.x-dev"
-        },
-        "laravel": {
-            "providers": [
-                "Watson\\Laravel\\WatsonServiceProvider"
-            ]
+            "dev-main": "0.4.x-dev"
         }
     },
     "scripts": {

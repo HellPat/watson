@@ -1,0 +1,24 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+(function (): void {
+    foreach (
+        [
+            __DIR__ . '/../vendor/autoload.php',          // running from watson repo
+            __DIR__ . '/../../../autoload.php',           // installed under consumer's vendor/
+            __DIR__ . '/../autoload.php',                 // edge: alongside vendor at parent
+        ] as $candidate
+    ) {
+        if (is_file($candidate)) {
+            require $candidate;
+
+            return;
+        }
+    }
+    fwrite(STDERR, "watson: unable to locate composer autoloader\n");
+    exit(1);
+})();
+
+exit((new \Watson\Cli\Application())->run());

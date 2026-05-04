@@ -6,6 +6,12 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- watson is now a **standalone CLI** (`vendor/bin/watson`). No bundle, no service provider, no `config/bundles.php` entry.
+- Route + command discovery is **outside-in** — shells out to `bin/console debug:router --format=json` (Symfony) and `php artisan route:list --json` (Laravel). watson code never runs inside the target kernel.
+- Reflection backend uses [`roave/better-reflection`](https://github.com/Roave/BetterReflection); watson never `require_once`s your app's source.
+
 ## [0.3.0] — 2026-05-03
 
 **One package, both frameworks.** Collapsed `watson/core`, `watson/laravel`, `watson/symfony` into a single `hellpat/watson` package. Detection logic, output renderers, and both adapter shells now ship in one composer install.
