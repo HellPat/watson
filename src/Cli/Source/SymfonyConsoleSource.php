@@ -68,41 +68,55 @@ final class SymfonyConsoleSource
     }
 
     /**
-     * Cross-checks runtime command names from `bin/console list --format=json`
-     * against `#[AsCommand]` attributes in user code. We deliberately skip
-     * vendor/ — users only care about their own command surface.
+     * Pull every service tagged `console.command` straight from the runtime
+     * container. Handler class is in the definition; user-facing name is in
+     * the tag parameters. Vendor commands are filtered by file path so users
+     * only see their own surface — no folder-convention guessing.
      *
      * @return list<EntryPoint>
      */
     public function commands(): array
     {
         $proc = new Process(
-            ['php', '-d', 'display_errors=stderr', $this->project->consoleScript, 'list', '--format=json', '--env=' . $this->appEnv],
+            ['php', '-d', 'display_errors=stderr', $this->project->consoleScript, 'debug:container', '--tag=console.command', '--format=json', '--env=' . $this->appEnv],
             $this->project->rootPath,
         );
         $proc->mustRun();
         $data = json_decode($proc->getOutput(), true);
-        if (!is_array($data) || !isset($data['commands']) || !is_array($data['commands'])) {
+        if (!is_array($data) || !isset($data['definitions']) || !is_array($data['definitions'])) {
             return [];
         }
 
-        $runtimeNames = [];
-        foreach ($data['commands'] as $cmd) {
-            if (is_array($cmd) && isset($cmd['name']) && is_string($cmd['name'])) {
-                $runtimeNames[$cmd['name']] = true;
-            }
-        }
-
         $out = [];
-        foreach ($this->reflector->reflectAllInDirs([$this->project->rootPath . '/src']) as $class) {
-            $name = $this->extractCommandName($class);
-            if ($name === null || !isset($runtimeNames[$name])) {
+        $seenClasses = [];
+        foreach ($data['definitions'] as $serviceId => $def) {
+            if (!is_array($def)) {
                 continue;
             }
-            $file = (string) $class->getFileName();
-            $line = $class->getStartLine() ?: 0;
+            $class = is_string($def['class'] ?? null) ? $def['class'] : (string) $serviceId;
+            if ($class === '' || isset($seenClasses[$class])) {
+                continue;
+            }
+            $seenClasses[$class] = true;
+
+            $classRef = $this->reflector->reflectClass($class);
+            if ($classRef === null) {
+                continue;
+            }
+            $file = (string) $classRef->getFileName();
+            if ($file === '' || str_contains($file, '/vendor/')) {
+                continue;
+            }
+
+            $name = $this->extractCommandNameFromTags($def['tags'] ?? [])
+                ?? $this->extractCommandNameFromAttribute($classRef);
+            if ($name === null) {
+                continue;
+            }
+
+            $line = $classRef->getStartLine() ?: 0;
             try {
-                $execute = $class->getMethod('execute');
+                $execute = $classRef->getMethod('execute');
                 if ($execute !== null) {
                     $line = $execute->getStartLine() ?: $line;
                 }
@@ -113,7 +127,7 @@ final class SymfonyConsoleSource
             $out[] = new EntryPoint(
                 kind: 'symfony.command',
                 name: $name,
-                handlerFqn: $class->getName() . '::execute',
+                handlerFqn: $class . '::execute',
                 handlerPath: $file,
                 handlerLine: $line,
                 source: Source::Runtime,
@@ -123,7 +137,26 @@ final class SymfonyConsoleSource
         return $out;
     }
 
-    private function extractCommandName(ReflectionClass $class): ?string
+    /** @param mixed $tags */
+    private function extractCommandNameFromTags(mixed $tags): ?string
+    {
+        if (!is_array($tags)) {
+            return null;
+        }
+        foreach ($tags as $tag) {
+            if (!is_array($tag) || ($tag['name'] ?? null) !== 'console.command') {
+                continue;
+            }
+            $params = $tag['parameters'] ?? null;
+            if (is_array($params) && isset($params['command']) && is_string($params['command']) && $params['command'] !== '') {
+                return $params['command'];
+            }
+        }
+
+        return null;
+    }
+
+    private function extractCommandNameFromAttribute(ReflectionClass $class): ?string
     {
         foreach ($class->getAttributesByName('Symfony\\Component\\Console\\Attribute\\AsCommand') as $attr) {
             $args = $attr->getArguments();

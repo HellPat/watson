@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Watson\Cli\Source;
 
-use Roave\BetterReflection\Reflection\ReflectionClass;
 use Symfony\Component\Process\Process;
 use Watson\Cli\Project;
 use Watson\Cli\Reflection\StaticReflector;
@@ -67,53 +66,79 @@ final class LaravelArtisanSource
         return $out;
     }
 
-    /** @return list<EntryPoint> */
+    /**
+     * Boot the target Laravel kernel via an inline `php -r` runner and dump
+     * `Artisan::all()` as JSON. Gives us name → handler-class authoritatively
+     * from Laravel's own runtime registry, regardless of where command
+     * classes live in the source tree. Vendor commands are filtered by file
+     * path so users only see their own surface.
+     *
+     * @return list<EntryPoint>
+     */
     public function commands(): array
     {
+        $runner = <<<'PHP'
+            $root = $argv[1] ?? getcwd();
+            require $root . '/vendor/autoload.php';
+            $app = require $root . '/bootstrap/app.php';
+            $kernel = $app->make(\Illuminate\Contracts\Console\Kernel::class);
+            $kernel->bootstrap();
+            $out = [];
+            foreach ($kernel->all() as $name => $cmd) {
+                $ref = new \ReflectionClass($cmd);
+                $out[] = [
+                    'name' => $name,
+                    'class' => $ref->getName(),
+                    'file' => $ref->getFileName() ?: '',
+                ];
+            }
+            echo json_encode($out);
+            PHP;
         $proc = new Process(
-            ['php', '-d', 'display_errors=stderr', $this->project->consoleScript, 'list', '--format=json', '--env=' . $this->appEnv],
+            ['php', '-d', 'display_errors=stderr', '-d', 'error_reporting=0', '-r', $runner, '--', $this->project->rootPath],
             $this->project->rootPath,
+            ['APP_ENV' => $this->appEnv],
         );
         $proc->mustRun();
         $data = json_decode($proc->getOutput(), true);
-        if (!is_array($data) || !isset($data['commands']) || !is_array($data['commands'])) {
+        if (!is_array($data)) {
             return [];
         }
 
-        $runtimeNames = [];
-        foreach ($data['commands'] as $cmd) {
-            if (is_array($cmd) && isset($cmd['name']) && is_string($cmd['name'])) {
-                $runtimeNames[$cmd['name']] = true;
-            }
-        }
-
         $out = [];
-        foreach ($this->reflector->reflectAllInDirs([$this->project->rootPath . '/app/Console/Commands']) as $class) {
-            try {
-                if (!$class->isSubclassOf('Illuminate\\Console\\Command')) {
-                    continue;
-                }
-            } catch (\Throwable) {
+        foreach ($data as $entry) {
+            if (!is_array($entry)) {
                 continue;
             }
-            $name = $this->extractLaravelCommandName($class);
-            if ($name === null || !isset($runtimeNames[$name])) {
+            $name = $entry['name'] ?? null;
+            $class = $entry['class'] ?? null;
+            $file = (string) ($entry['file'] ?? '');
+            if (!is_string($name) || !is_string($class) || $name === '' || $class === '') {
                 continue;
             }
-            $line = $class->getStartLine() ?: 0;
-            try {
-                $handle = $class->getMethod('handle');
-                if ($handle !== null) {
-                    $line = $handle->getStartLine() ?: $line;
-                }
-            } catch (\Throwable) {
-                // class-level line
+            if ($file === '' || str_contains($file, '/vendor/')) {
+                continue;
             }
+
+            $line = 0;
+            $classRef = $this->reflector->reflectClass($class);
+            if ($classRef !== null) {
+                $line = $classRef->getStartLine() ?: 0;
+                try {
+                    $handle = $classRef->getMethod('handle');
+                    if ($handle !== null) {
+                        $line = $handle->getStartLine() ?: $line;
+                    }
+                } catch (\Throwable) {
+                    // class-level line
+                }
+            }
+
             $out[] = new EntryPoint(
                 kind: 'laravel.command',
                 name: $name,
-                handlerFqn: $class->getName() . '::handle',
-                handlerPath: (string) $class->getFileName(),
+                handlerFqn: $class . '::handle',
+                handlerPath: $file,
                 handlerLine: $line,
                 source: Source::Runtime,
             );
@@ -145,41 +170,4 @@ final class LaravelArtisanSource
         return array_values(array_filter(explode('|', $methodSpec), static fn (string $m): bool => $m !== ''));
     }
 
-    private function extractLaravelCommandName(ReflectionClass $class): ?string
-    {
-        try {
-            $sig = $class->getProperty('signature');
-            if ($sig !== null) {
-                $value = $sig->getDefaultValue();
-                if (is_string($value)) {
-                    $first = strtok($value, " \n\t");
-                    if ($first !== false && $first !== '') {
-                        return $first;
-                    }
-                }
-            }
-        } catch (\Throwable) {
-            // try $name fallback
-        }
-        try {
-            $nameProp = $class->getProperty('name');
-            if ($nameProp !== null) {
-                $value = $nameProp->getDefaultValue();
-                if (is_string($value) && $value !== '') {
-                    return $value;
-                }
-            }
-        } catch (\Throwable) {
-            // try attribute fallback
-        }
-        foreach ($class->getAttributesByName('Symfony\\Component\\Console\\Attribute\\AsCommand') as $attr) {
-            $args = $attr->getArguments();
-            $candidate = $args[0] ?? $args['name'] ?? null;
-            if (is_string($candidate) && $candidate !== '') {
-                return $candidate;
-            }
-        }
-
-        return null;
-    }
 }
