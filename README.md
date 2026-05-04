@@ -60,12 +60,41 @@ Consider: blast radius across kinds, whether async paths (jobs / listeners)
 are involved, whether a test exists for every affected route."
 ```
 
-### Release-note bullet
+---
+
+## Post-release recipes
+
+After a deploy, pipe the **just-shipped** entry points into an LLM that has observability MCP servers wired up — e.g. [Better Stack MCP](https://betterstack.com/docs/getting-started/integrations/mcp/) (`claude mcp add betterstack --transport http https://mcp.betterstack.com`). The LLM gets the surface that changed *and* live metrics — it can correlate the two.
+
+### Latency regression on routes that changed in the last release
 
 ```bash
-vendor/bin/watson blastradius origin/main...HEAD --format=md | llm \
-  --system "Compress the affected routes / commands / jobs into one
-user-facing CHANGELOG bullet."
+vendor/bin/watson blastradius v1.4.0..v1.5.0 --scope=routes --format=md | llm \
+  --system "These routes shipped in v1.5.0. Use Better Stack MCP:
+for each route, query p50 / p95 latency since the deploy timestamp
+and compare to the previous 24h baseline. Flag any route whose p95
+grew >20% or whose error rate doubled."
+```
+
+### Error rate / exception regression after deploy
+
+```bash
+vendor/bin/watson blastradius v1.4.0..v1.5.0 --format=md | llm \
+  --system "These entry points (routes / commands / jobs / listeners)
+shipped in v1.5.0. Use Better Stack MCP error tracking to:
+- list new exception classes seen on any affected handler since deploy,
+- count occurrences vs the prior 24h,
+- group by handler FQN and rank by impact."
+```
+
+### Open incidents touching the changed surface
+
+```bash
+vendor/bin/watson list-entrypoints --scope=routes --format=md | llm \
+  --system "Use Better Stack MCP to list all currently-open incidents.
+For each incident, identify which (if any) of the entry points below
+is involved. Output a markdown table mapping incident → affected
+entry point with a one-line summary."
 ```
 
 ---
