@@ -327,23 +327,14 @@ final class Renderer
         }
 
         if ($name === 'blastradius') {
-            $summary = $result['summary'] ?? [];
-            $files   = (int) ($summary['files_changed'] ?? 0);
-            $hits    = (int) ($summary['entry_points_affected'] ?? 0);
-            $lines[] = sprintf(
-                '**Summary** — 📂 `%d` file%s · 🎯 `%d` entry point%s affected',
-                $files,
-                $files === 1 ? '' : 's',
-                $hits,
-                $hits === 1 ? '' : 's',
-            );
-            $lines[] = '';
             $affected = $result['affected_entry_points'] ?? [];
             if ($affected === []) {
                 $lines[] = '_💤 nothing reached. Diff did not touch any registered entry point or its direct callers._';
 
                 return;
             }
+            $lines[] = self::reachLegend();
+            $lines[] = '';
             foreach (self::groupByKind($affected) as $kind => $entries) {
                 $rows = [];
                 foreach ($entries as $ep) {
@@ -359,6 +350,15 @@ final class Renderer
                 $lines[] = '';
             }
         }
+    }
+
+    private static function reachLegend(): string
+    {
+        return '<sub>'
+            . '🎯 `direct` — entry point\'s own handler file is in the diff'
+            . ' &nbsp;·&nbsp; '
+            . '🔗 `transitive` — handler reaches a changed file through its imports / `new` / static calls / type hints'
+            . '</sub>';
     }
 
     /**
