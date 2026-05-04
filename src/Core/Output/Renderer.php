@@ -445,7 +445,7 @@ final class Renderer
         if ($path === '') {
             return $fqn;
         }
-        return sprintf("%s\n%s:%d", $fqn, $path, $line);
+        return sprintf('%s (%s:%d)', $fqn, $path, $line);
     }
 
     /** @param list<array<string,mixed>> $lines */

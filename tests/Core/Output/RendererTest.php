@@ -57,9 +57,8 @@ final class RendererTest extends TestCase
         // Reach badges (no backticks inside table cells).
         $this->assertStringContainsString('🎯 direct', $out);
         $this->assertStringContainsString('🔗 transitive', $out);
-        // Handler FQN + path:line on adjacent lines inside the cell.
-        $this->assertStringContainsString('App\\HomeController::index', $out);
-        $this->assertStringContainsString('src/HomeController.php:8', $out);
+        // Handler FQN + path:line on a single line inside the cell.
+        $this->assertStringContainsString('App\\HomeController::index (src/HomeController.php:8)', $out);
     }
 
     public function testTextRendersSummaryAndCounts(): void

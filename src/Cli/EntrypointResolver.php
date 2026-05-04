@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Watson\Cli;
 
+use Composer\Autoload\ClassLoader;
 use Watson\Cli\Reflection\StaticReflector;
 use Watson\Cli\Source\LaravelArtisanSource;
 use Watson\Cli\Source\SymfonyConsoleSource;
@@ -32,11 +33,22 @@ final class EntrypointResolver
         $scope = $opts['scope'] ?? self::SCOPE_ALL;
         $appEnv = $opts['app_env'] ?? 'dev';
 
-        $reflector = new StaticReflector($project->rootPath);
+        $classLoader = self::loadConsumerClassLoader($project->rootPath);
+        $reflector   = new StaticReflector($project->rootPath, $classLoader);
 
         return $project->framework === Framework::Symfony
             ? self::collectSymfony($project, $reflector, $scope, $appEnv)
             : self::collectLaravel($project, $reflector, $scope, $appEnv);
+    }
+
+    private static function loadConsumerClassLoader(string $projectRoot): ?ClassLoader
+    {
+        $autoload = $projectRoot . '/vendor/autoload.php';
+        if (!is_file($autoload)) {
+            return null;
+        }
+        $loader = require $autoload;
+        return $loader instanceof ClassLoader ? $loader : null;
     }
 
     /** @return list<EntryPoint> */
