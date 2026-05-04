@@ -72,6 +72,18 @@ final class ComposerProjectStaging
             (string) json_encode($installed, JSON_UNESCAPED_SLASHES),
         );
 
+        // Project-root entries (e.g. `app/`, `src/`, `tests/`) are referenced
+        // by PSR-4 paths in composer.json — symlink them so the factory can
+        // resolve them against the staging root. composer.json is sanitized
+        // above; vendor/ is handled below.
+        $rootEntries = @scandir($projectRoot) ?: [];
+        foreach ($rootEntries as $entry) {
+            if ($entry === '.' || $entry === '..' || $entry === 'composer.json' || $entry === 'vendor') {
+                continue;
+            }
+            @symlink($projectRoot . '/' . $entry, $stage . '/' . $entry);
+        }
+
         $vendorEntries = @scandir($projectRoot . '/vendor') ?: [];
         foreach ($vendorEntries as $entry) {
             if ($entry === '.' || $entry === '..' || $entry === 'composer') {
