@@ -17,26 +17,27 @@ use Watson\Core\Diff\DiffSpec;
 use Watson\Core\Output\Envelope;
 use Watson\Core\Output\Renderer;
 
-#[AsCommand(name: 'blastradius', description: 'Report entry points whose handler files are in the diff.')]
+#[AsCommand(
+    name: 'blastradius',
+    description: 'Report which routes, commands, jobs, and listeners are reached by a git diff.',
+)]
 final class BlastradiusCommand extends Command
 {
     protected function configure(): void
     {
         $this
-            ->addArgument('revisions', InputArgument::IS_ARRAY, 'git diff revision spec(s)')
-            ->addOption('cached', null, InputOption::VALUE_NONE, 'compare staged index vs HEAD')
-            ->addOption('project', null, InputOption::VALUE_REQUIRED, 'Project root (default: walk up from CWD)')
-            ->addOption('framework', null, InputOption::VALUE_REQUIRED, 'symfony|laravel (auto-detect when omitted)')
-            ->addOption('format', null, InputOption::VALUE_REQUIRED, 'Output format (json|md|text)', 'json')
-            ->addOption('scope', null, InputOption::VALUE_REQUIRED, 'Discovery scope (routes|all)', 'all')
-            ->addOption('app-env', null, InputOption::VALUE_REQUIRED, 'env passed to bin/console / artisan', 'dev');
+            ->addArgument('revisions', InputArgument::IS_ARRAY, 'Git diff revisions: <rev>, <a> <b>, <a>..<b>, or <a>...<b> (merge-base). Empty = working tree vs HEAD.')
+            ->addOption('cached', null, InputOption::VALUE_NONE, 'Diff staged index vs HEAD instead of working tree')
+            ->addOption('project', null, InputOption::VALUE_REQUIRED, 'Project root (defaults to walking up from CWD)')
+            ->addOption('format', null, InputOption::VALUE_REQUIRED, 'Output format: text (human terminal), md (markdown for PRs/LLMs), json (machine), tok (tab-separated, token-optimized for LLM pipes)', 'text')
+            ->addOption('scope', null, InputOption::VALUE_REQUIRED, 'routes (cheapest, runtime registry only) or all (adds commands / jobs / listeners / tests)', 'all')
+            ->addOption('app-env', null, InputOption::VALUE_REQUIRED, 'APP_ENV passed to bin/console / artisan', 'dev');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $startDir = (string) ($input->getOption('project') ?? (getcwd() ?: '.'));
-        $force = $input->getOption('framework');
-        $project = ProjectDetector::detect($startDir, is_string($force) && $force !== '' ? $force : null);
+        $project = ProjectDetector::detect($startDir);
 
         /** @var list<string> $revisions */
         $revisions = (array) $input->getArgument('revisions');

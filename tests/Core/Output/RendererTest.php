@@ -45,6 +45,31 @@ final class RendererTest extends TestCase
         $this->assertStringContainsString('symfony.command', $out);
     }
 
+    public function testTokIsTabSeparatedAndHasKindLegend(): void
+    {
+        $envelope = self::sampleListEnvelope();
+        $out = Renderer::render(Renderer::FORMAT_TOK, $envelope);
+
+        $this->assertStringContainsString('# watson', $out);
+        $this->assertStringContainsString('# entrypoints=1', $out);
+        $this->assertStringContainsString('# kinds: sr=symfony.route', $out);
+        // Body row: kind \t name \t fqn \t path:line \t extra
+        $this->assertMatchesRegularExpression('/\nsr\tname\t.*\t.*\t/', "\n" . $out);
+        // Crude but clear: tok output should be markedly shorter than json.
+        $json = Renderer::render(Renderer::FORMAT_JSON, $envelope);
+        $this->assertLessThan(strlen($json), strlen($out));
+    }
+
+    public function testTokBlastradiusIncludesSummaryHeader(): void
+    {
+        $envelope = self::sampleBlastradiusEnvelope();
+        $out = Renderer::render(Renderer::FORMAT_TOK, $envelope);
+
+        $this->assertStringContainsString('# files=2 affected=2', $out);
+        $this->assertStringContainsString("\nsr\thome\t", $out);
+        $this->assertStringContainsString("\nsc\tapp:ping\t", $out);
+    }
+
     public function testUnknownFormatThrows(): void
     {
         $this->expectException(\InvalidArgumentException::class);
@@ -56,7 +81,7 @@ final class RendererTest extends TestCase
         $envelope = new Envelope(language: 'php', framework: 'symfony', rootPath: '/x');
         $envelope->pushAnalysis('list-entrypoints', '0.2.0', [
             'entry_points' => [
-                ['kind' => 'symfony.route', 'name' => 'home', 'handler_fqn' => 'X::y', 'handler_path' => '/abs/X.php', 'handler_line' => 12, 'source' => 'runtime'],
+                ['kind' => 'symfony.route', 'name' => 'name', 'handler_fqn' => 'X::y', 'handler_path' => '/abs/X.php', 'handler_line' => 12, 'source' => 'runtime', 'extra' => ['path' => '/', 'methods' => ['GET']]],
             ],
         ]);
 

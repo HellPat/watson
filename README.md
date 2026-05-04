@@ -129,15 +129,67 @@ No bundle, no service provider, no `config/bundles.php` entry. watson auto-detec
 
 Snapshot every entry point the framework registered.
 
-### Flags (both commands)
+### `watson <cmd> --help`
 
-| flag                           | default | meaning                                                         |
-| ---                            | ---     | ---                                                             |
-| `--project=<path>`             | cwd     | project root (otherwise walked up from CWD)                     |
-| `--framework=symfony\|laravel` | auto    | force when both `bin/console` and `artisan` exist               |
-| `--app-env=<env>`              | `dev`   | env passed to `bin/console` / `artisan`                         |
-| `--format=json\|md\|text`      | `json`  | output format                                                   |
-| `--scope=routes\|all`          | `all`   | `all` adds commands / jobs / listeners / tests                  |
+```
+$ watson blastradius --help
+
+Description:
+  Report which routes, commands, jobs, and listeners are reached by a git diff.
+
+Usage:
+  blastradius [options] [--] [<revisions>...]
+
+Arguments:
+  revisions              Git diff revisions: <rev>, <a> <b>, <a>..<b>, or <a>...<b> (merge-base).
+                         Empty = working tree vs HEAD.
+
+Options:
+      --cached           Diff staged index vs HEAD instead of working tree
+      --project=PROJECT  Project root (defaults to walking up from CWD)
+      --format=FORMAT    Output format: text (human terminal), md (markdown for PRs/LLMs),
+                         json (machine), tok (tab-separated, token-optimized for LLM pipes)
+                         [default: "text"]
+      --scope=SCOPE      routes (cheapest, runtime registry only) or all
+                         (adds commands / jobs / listeners / tests) [default: "all"]
+      --app-env=APP-ENV  APP_ENV passed to bin/console / artisan [default: "dev"]
+```
+
+```
+$ watson list-entrypoints --help
+
+Description:
+  Snapshot every route, command, job, listener, and test the framework has registered.
+
+Usage:
+  list-entrypoints [options]
+
+Options:
+      --project=PROJECT  Project root (defaults to walking up from CWD)
+      --format=FORMAT    Output format: text (human terminal), md (markdown for PRs/LLMs),
+                         json (machine), tok (tab-separated, token-optimized for LLM pipes)
+                         [default: "text"]
+      --scope=SCOPE      routes (cheapest, runtime registry only) or all
+                         (adds commands / jobs / listeners / tests) [default: "all"]
+      --app-env=APP-ENV  APP_ENV passed to bin/console / artisan [default: "dev"]
+```
+
+### `--format=tok` — token-optimized for LLM pipes
+
+Tab-separated, no JSON keys, no whitespace padding. Header lines start with `#`. Designed for piping into LLM prompts where every token costs money.
+
+```
+# watson 0.3.0 list-entrypoints php/laravel root=/abs/path
+# entrypoints=4
+# kinds: lc=laravel.command lj=laravel.job lr=laravel.route pt=phpunit.test
+# fields: kind\tname\thandler\tpath:line\textra
+lr	users.show	App\Http\Controllers\UserController::show	app/Http/Controllers/UserController.php:42	GET /users/{id}
+lc	app:ping	App\Console\Commands\PingCommand::handle	app/Console/Commands/PingCommand.php:14
+lj	App\Jobs\PingJob	App\Jobs\PingJob::handle	app/Jobs/PingJob.php:11
+pt	SmokeTest::testPasses	Tests\Unit\SmokeTest::testPasses	tests/Unit/SmokeTest.php:11
+```
+
+Per-row layout: `kind \t name \t handler_fqn \t relative/path:line \t extra` (extra is HTTP-method+path for routes, empty otherwise).
 
 ---
 
@@ -154,41 +206,6 @@ Snapshot every entry point the framework registered.
 | `phpunit.test`                | AST scan of `tests/` for `PHPUnit\Framework\TestCase` subclasses                        |
 
 watson is a CLI binary, not a bundle/provider. AST scans go through [`roave/better-reflection`](https://github.com/Roave/BetterReflection) — watson never `require_once`s your app's source.
-
----
-
-## Output schema
-
-```json
-{
-  "tool": "watson",
-  "version": "0.3.0",
-  "language": "php",
-  "framework": "laravel",
-  "context": {"root": "/abs/path", "base": "main", "head": "<working tree>"},
-  "analyses": [
-    {
-      "name": "blastradius",
-      "version": "0.3.0",
-      "ok": true,
-      "result": {
-        "summary": {"files_changed": 1, "entry_points_affected": 2},
-        "affected_entry_points": [
-          {
-            "kind": "laravel.route",
-            "name": "users.show",
-            "handler": {"fqn": "App\\Controller::show", "path": "app/Controller.php", "line": 42},
-            "extra": {"path": "/users/{id}", "methods": ["GET"]},
-            "min_confidence": "NameOnly"
-          }
-        ]
-      }
-    }
-  ]
-}
-```
-
-Reach is **file-level**: an entry point is "affected" iff its handler file is in the diff. High recall, modest precision (a docblock-only edit shows up); confidence is reported as `NameOnly` so consumers can filter.
 
 ---
 
