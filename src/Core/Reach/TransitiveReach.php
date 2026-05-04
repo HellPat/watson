@@ -4,10 +4,14 @@ declare(strict_types=1);
 
 namespace Watson\Core\Reach;
 
+use PhpParser\Node;
 use PhpParser\Node\Name;
-use PhpParser\NodeFinder;
+use PhpParser\Node\Stmt\GroupUse;
+use PhpParser\Node\Stmt\Use_;
 use PhpParser\NodeTraverser;
+use PhpParser\NodeVisitor;
 use PhpParser\NodeVisitor\NameResolver;
+use PhpParser\NodeVisitorAbstract;
 use PhpParser\ParserFactory;
 use Composer\Autoload\ClassLoader;
 use Watson\Core\Entrypoint\EntryPoint;
@@ -70,14 +74,12 @@ final class TransitiveReach
         }
 
         $parser = (new ParserFactory())->createForHostVersion();
-        $finder = new NodeFinder();
 
         // Step 1: forward graph from every entry-point handler file.
         $forward = self::buildForwardGraph(
             self::collectSeedFiles($entryPoints, $rootReal, $vendorReal),
             $classLoader,
             $parser,
-            $finder,
             $rootReal,
             $vendorReal,
             $maxFiles,
@@ -130,7 +132,6 @@ final class TransitiveReach
         array $seeds,
         ClassLoader $classLoader,
         \PhpParser\Parser $parser,
-        NodeFinder $finder,
         string $rootReal,
         string|false $vendorReal,
         int $maxFiles,
@@ -147,7 +148,7 @@ final class TransitiveReach
             if (isset($forward[$file])) {
                 continue;
             }
-            $edges = self::resolveOutgoingEdges($file, $classLoader, $parser, $finder, $rootReal, $vendorReal, $fqnCache);
+            $edges = self::resolveOutgoingEdges($file, $classLoader, $parser, $rootReal, $vendorReal, $fqnCache);
             $forward[$file] = $edges;
             foreach ($edges as $next) {
                 if (!isset($forward[$next])) {
@@ -215,7 +216,6 @@ final class TransitiveReach
         string $file,
         ClassLoader $classLoader,
         \PhpParser\Parser $parser,
-        NodeFinder $finder,
         string $rootReal,
         string|false $vendorReal,
         array &$fqnCache,
@@ -234,7 +234,7 @@ final class TransitiveReach
         }
 
         $resolved = self::resolveNames($ast);
-        $names    = $finder->findInstanceOf($resolved, Name::class);
+        $names    = self::collectMeaningfulNames($resolved);
 
         $edges    = [];
         $seenFqns = [];
@@ -275,8 +275,8 @@ final class TransitiveReach
      * enclosing namespace so subsequent `Name` nodes carry an absolute
      * FQN we can reflect on.
      *
-     * @param list<\PhpParser\Node> $ast
-     * @return list<\PhpParser\Node>
+     * @param list<Node> $ast
+     * @return list<Node>
      */
     private static function resolveNames(array $ast): array
     {
@@ -286,6 +286,40 @@ final class TransitiveReach
             ['preserveOriginalNames' => false, 'replaceNodes' => true],
         ));
         return $traverser->traverse($ast);
+    }
+
+    /**
+     * Collect every `Name` node that represents a meaningful class reference
+     * in the source (new, static call, type hint, extends/implements,
+     * `Foo::class`, …). `use` and `group use` statement subtrees are
+     * skipped — those imports are already inlined into the body's Name
+     * nodes by the NameResolver pass, and treating each `use X` as its own
+     * graph edge would follow every unused import and explode the closure.
+     *
+     * @param list<Node> $ast
+     * @return list<Name>
+     */
+    private static function collectMeaningfulNames(array $ast): array
+    {
+        $visitor = new class extends NodeVisitorAbstract {
+            /** @var list<Name> */
+            public array $names = [];
+
+            public function enterNode(Node $node): null|int
+            {
+                if ($node instanceof Use_ || $node instanceof GroupUse) {
+                    return NodeVisitor::DONT_TRAVERSE_CHILDREN;
+                }
+                if ($node instanceof Name) {
+                    $this->names[] = $node;
+                }
+                return null;
+            }
+        };
+        $traverser = new NodeTraverser();
+        $traverser->addVisitor($visitor);
+        $traverser->traverse($ast);
+        return $visitor->names;
     }
 
     /** @return array<string, true> */

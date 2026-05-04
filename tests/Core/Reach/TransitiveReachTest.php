@@ -164,6 +164,38 @@ final class TransitiveReachTest extends TestCase
         self::assertSame([0], $hits);
     }
 
+    public function testIgnoresUnusedImports(): void
+    {
+        // Importing a class without using it must NOT pull it into the
+        // closure — otherwise watson reports every route whose controller
+        // imports a model it never actually instantiates.
+        $service = $this->project . '/app/Service/MyService.php';
+        $other   = $this->project . '/app/Service/Unused.php';
+        $job     = $this->project . '/app/Jobs/MyJob.php';
+        file_put_contents($service, '<?php namespace App\Service; class MyService {}');
+        file_put_contents($other, '<?php namespace App\Service; class Unused {}');
+        file_put_contents($job, '<?php
+            namespace App\Jobs;
+
+            use App\Service\MyService;
+            use App\Service\Unused;
+
+            class MyJob {
+                public function handle(): void {
+                    new MyService();
+                }
+            }
+        ');
+
+        $reflector = $this->makeLoader();
+        $eps       = [$this->ep('App\\Jobs\\MyJob', $job)];
+
+        // A change in the Unused class must not flag the job — only
+        // a change in MyService should.
+        self::assertSame([], TransitiveReach::affectedIndices($eps, [$other], $reflector, $this->project));
+        self::assertSame([0], TransitiveReach::affectedIndices($eps, [$service], $reflector, $this->project));
+    }
+
     public function testReturnsEmptyWhenNoChangedFiles(): void
     {
         $reflector = $this->makeLoader();
