@@ -25,14 +25,34 @@ final class RendererTest extends TestCase
         $envelope = self::sampleBlastradiusEnvelope();
         $out = Renderer::render(Renderer::FORMAT_MD, $envelope);
 
-        $this->assertStringContainsString('#### symfony.route', $out);
-        $this->assertStringContainsString('#### symfony.command', $out);
+        $this->assertStringContainsString('`symfony.route`', $out);
+        $this->assertStringContainsString('`symfony.command`', $out);
         // Symfony.route comes before symfony.command in the stable order.
-        $routePos = strpos($out, '#### symfony.route');
-        $commandPos = strpos($out, '#### symfony.command');
+        $routePos = strpos($out, '`symfony.route`');
+        $commandPos = strpos($out, '`symfony.command`');
         $this->assertNotFalse($routePos);
         $this->assertNotFalse($commandPos);
         $this->assertLessThan($commandPos, $routePos);
+    }
+
+    public function testMarkdownRendersTableWithIconsAndReachBadge(): void
+    {
+        $envelope = self::sampleBlastradiusEnvelope();
+        $envelope = self::withConfidence($envelope, ['NameOnly', 'Transitive']);
+        $out = Renderer::render(Renderer::FORMAT_MD, $envelope);
+
+        // GFM table header for each kind.
+        $this->assertStringContainsString('| reach | name | handler |', $out);
+        $this->assertStringContainsString('|---|---|---|', $out);
+        // Kind icon next to the kind label.
+        $this->assertStringContainsString('🛣️', $out);
+        $this->assertStringContainsString('⌨️', $out);
+        // Reach badges.
+        $this->assertStringContainsString('🎯 `direct`', $out);
+        $this->assertStringContainsString('🔗 `transitive`', $out);
+        // Handler cell formatted as `fqn` and `path:line`.
+        $this->assertStringContainsString('`App\\HomeController::index`', $out);
+        $this->assertStringContainsString('`src/HomeController.php:8`', $out);
     }
 
     public function testTextRendersSummaryAndCounts(): void
@@ -86,6 +106,31 @@ final class RendererTest extends TestCase
         ]);
 
         return $envelope;
+    }
+
+    /**
+     * Re-emit the same blastradius analysis with explicit min_confidence
+     * values per affected entry point (in stable kind order — command
+     * first, then route, matching the fixture).
+     *
+     * @param list<string> $confidences
+     */
+    private static function withConfidence(Envelope $envelope, array $confidences): Envelope
+    {
+        $analyses = $envelope->jsonSerialize()['analyses'] ?? [];
+        $rebuilt = new Envelope(language: 'php', framework: 'symfony', rootPath: '/x', base: 'main', head: 'HEAD');
+        foreach ($analyses as $a) {
+            if (($a['name'] ?? '') === 'blastradius') {
+                $eps = $a['result']['affected_entry_points'] ?? [];
+                foreach ($eps as $i => &$ep) {
+                    $ep['min_confidence'] = $confidences[$i] ?? 'NameOnly';
+                }
+                unset($ep);
+                $a['result']['affected_entry_points'] = $eps;
+            }
+            $rebuilt->pushAnalysis($a['name'], $a['version'], $a['result'] ?? []);
+        }
+        return $rebuilt;
     }
 
     private static function sampleBlastradiusEnvelope(): Envelope

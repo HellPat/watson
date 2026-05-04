@@ -304,13 +304,22 @@ final class Renderer
 
                 return;
             }
-            $lines[] = '| kind | name | handler |';
-            $lines[] = '|---|---|---|';
-            foreach ($eps as $ep) {
-                $loc = ($ep['handler_path'] ?? '') === ''
-                    ? sprintf('`%s`', $ep['handler_fqn'] ?? '?')
-                    : sprintf('`%s` (`%s:%d`)', $ep['handler_fqn'] ?? '?', $ep['handler_path'] ?? '?', $ep['handler_line'] ?? 0);
-                $lines[] = sprintf('| `%s` | `%s` | %s |', $ep['kind'] ?? '?', $ep['name'] ?? '?', $loc);
+            foreach (self::groupByKind($eps) as $kind => $entries) {
+                $icon = self::kindIcon($kind);
+                $lines[] = sprintf('#### %s `%s` &nbsp;·&nbsp; %d', $icon, $kind, count($entries));
+                $lines[] = '';
+                $lines[] = '| name | handler |';
+                $lines[] = '|---|---|';
+                foreach ($entries as $ep) {
+                    $name = self::formatListName($ep, $kind);
+                    $handler = self::formatHandlerCell(
+                        $ep['handler_fqn'] ?? '?',
+                        $ep['handler_path'] ?? '',
+                        (int) ($ep['handler_line'] ?? 0),
+                    );
+                    $lines[] = sprintf('| %s | %s |', $name, $handler);
+                }
+                $lines[] = '';
             }
 
             return;
@@ -318,48 +327,101 @@ final class Renderer
 
         if ($name === 'blastradius') {
             $summary = $result['summary'] ?? [];
+            $files   = (int) ($summary['files_changed'] ?? 0);
+            $hits    = (int) ($summary['entry_points_affected'] ?? 0);
             $lines[] = sprintf(
-                '**Summary** — %d files changed · %d entry points affected',
-                $summary['files_changed'] ?? 0,
-                $summary['entry_points_affected'] ?? 0,
+                '**Summary** &nbsp; 📂 `%d` file%s &nbsp;·&nbsp; 🎯 `%d` entry point%s affected',
+                $files,
+                $files === 1 ? '' : 's',
+                $hits,
+                $hits === 1 ? '' : 's',
             );
             $lines[] = '';
             $affected = $result['affected_entry_points'] ?? [];
             if ($affected === []) {
-                $lines[] = '### Affected entry points';
-                $lines[] = '';
-                $lines[] = '_None._ The diff did not transitively reach any HTTP route, console command, message handler, or scheduled task.';
+                $lines[] = '_💤 nothing reached. Diff did not touch any registered entry point or its direct callers._';
 
                 return;
             }
-            $lines[] = sprintf('### Affected entry points (%d)', count($affected));
-            $lines[] = '';
             foreach (self::groupByKind($affected) as $kind => $entries) {
-                $lines[] = sprintf('#### %s (%d)', $kind, count($entries));
+                $icon = self::kindIcon($kind);
+                $lines[] = sprintf('#### %s `%s` &nbsp;·&nbsp; %d', $icon, $kind, count($entries));
                 $lines[] = '';
+                $lines[] = '| reach | name | handler |';
+                $lines[] = '|---|---|---|';
                 foreach ($entries as $ep) {
-                    $lines[] = sprintf('##### %s', $ep['name'] ?? '?');
-                    $lines[] = '';
-                    $lines[] = sprintf(
-                        '- **Handler**: `%s` (`%s:%d`)',
-                        $ep['handler']['fqn'] ?? '?',
-                        $ep['handler']['path'] ?? '?',
-                        $ep['handler']['line'] ?? 0,
+                    $reach   = self::reachBadge($ep['min_confidence'] ?? null);
+                    $name    = self::formatBlastName($ep, $kind);
+                    $handler = self::formatHandlerCell(
+                        $ep['handler']['fqn']  ?? '?',
+                        $ep['handler']['path'] ?? '',
+                        (int) ($ep['handler']['line'] ?? 0),
                     );
-                    if (isset($ep['extra']['path'])) {
-                        $methods = isset($ep['extra']['methods']) && is_array($ep['extra']['methods'])
-                            ? implode(', ', $ep['extra']['methods'])
-                            : '';
-                        if ($methods !== '') {
-                            $lines[] = sprintf('- **HTTP**: %s `%s`', $methods, $ep['extra']['path']);
-                        } else {
-                            $lines[] = sprintf('- **HTTP path**: `%s`', $ep['extra']['path']);
-                        }
-                    }
-                    $lines[] = '';
+                    $lines[] = sprintf('| %s | %s | %s |', $reach, $name, $handler);
                 }
+                $lines[] = '';
             }
         }
+    }
+
+    private static function kindIcon(string $kind): string
+    {
+        return match ($kind) {
+            'laravel.route', 'symfony.route'                                            => '🛣️',
+            'laravel.command', 'symfony.command'                                        => '⌨️',
+            'laravel.job'                                                               => '⚡',
+            'laravel.listener', 'symfony.event_listener'                                => '👂',
+            'symfony.message_handler'                                                   => '📨',
+            'laravel.scheduled_task', 'symfony.cron_task', 'symfony.periodic_task',
+            'symfony.schedule_provider'                                                 => '⏱️',
+            'phpunit.test'                                                              => '🧪',
+            default                                                                     => '🔹',
+        };
+    }
+
+    private static function reachBadge(?string $confidence): string
+    {
+        return match ($confidence) {
+            'NameOnly'   => '🎯 `direct`',
+            'Transitive' => '🔗 `transitive`',
+            default      => '·',
+        };
+    }
+
+    private static function formatBlastName(array $ep, string $kind): string
+    {
+        $extra = $ep['extra'] ?? null;
+        if (is_array($extra) && isset($extra['path'])) {
+            $methods = isset($extra['methods']) && is_array($extra['methods'])
+                ? implode('|', $extra['methods'])
+                : '';
+            return $methods !== ''
+                ? sprintf('`%s %s`', $methods, $extra['path'])
+                : sprintf('`%s`', $extra['path']);
+        }
+        return sprintf('`%s`', $ep['name'] ?? '?');
+    }
+
+    private static function formatListName(array $ep, string $kind): string
+    {
+        $extra = $ep['extra'] ?? null;
+        if (is_array($extra) && isset($extra['path'])) {
+            $methods = isset($extra['methods']) && is_array($extra['methods'])
+                ? implode('|', $extra['methods'])
+                : '';
+            return $methods !== ''
+                ? sprintf('`%s %s`', $methods, $extra['path'])
+                : sprintf('`%s`', $extra['path']);
+        }
+        return sprintf('`%s`', $ep['name'] ?? '?');
+    }
+
+    private static function formatHandlerCell(string $fqn, string $path, int $line): string
+    {
+        if ($path === '') {
+            return sprintf('`%s`', $fqn);
+        }
+        return sprintf('`%s` <br/> <sub>`%s:%d`</sub>', $fqn, $path, $line);
     }
 
     /** @param list<array<string,mixed>> $lines */
