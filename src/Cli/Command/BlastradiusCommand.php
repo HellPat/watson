@@ -11,6 +11,7 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Watson\Cli\EntrypointResolver;
 use Watson\Cli\ProjectDetector;
+use Watson\Cli\Reflection\StaticReflector;
 use Watson\Core\Analysis\Blastradius;
 use Watson\Core\Diff\ChangedFilesReader;
 use Watson\Core\Output\Envelope;
@@ -82,7 +83,8 @@ final class BlastradiusCommand extends Command
             ));
         }
 
-        Blastradius::run($envelope, $project->rootPath, $changedFiles, $eps);
+        $reflector = new StaticReflector($project->rootPath);
+        Blastradius::run($envelope, $project->rootPath, $changedFiles, $eps, $reflector);
 
         $output->write(Renderer::render((string) $input->getOption('format'), $envelope));
 

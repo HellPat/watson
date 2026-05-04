@@ -4,17 +4,25 @@ declare(strict_types=1);
 
 namespace Watson\Core\Analysis;
 
+use Watson\Cli\Reflection\StaticReflector;
 use Watson\Core\Entrypoint\EntryPoint;
 use Watson\Core\Output\Envelope;
 use Watson\Core\Reach\FileLevelReach;
+use Watson\Core\Reach\TransitiveReach;
 
 /**
  * Build a blastradius analysis result from a list of runtime entry points
- * and a list of changed files. Pure function on top of the file-level
- * reach algorithm — both inputs are supplied by the caller (the entry-
- * point list comes from the framework adapters; the changed-files list
- * comes from `Watson\Core\Diff\ChangedFilesReader`, which reads stdin or
- * `--files`). watson does not shell out to git.
+ * and a list of changed files. Two reach passes are merged:
+ *
+ * 1. {@see FileLevelReach} — the entry point's own handler file is in the
+ *    diff (high precision, low recall).
+ * 2. {@see TransitiveReach} — the entry point's class transitively
+ *    references at least one file in the diff (high recall, modest
+ *    precision; catches services edited "behind" a controller/job).
+ *
+ * Both inputs come from the caller — entry points from the framework
+ * adapters, changed files from `Watson\Core\Diff\ChangedFilesReader`.
+ * watson does not shell out to git.
  */
 final class Blastradius
 {
@@ -30,12 +38,28 @@ final class Blastradius
         string $projectRoot,
         array $changedFiles,
         array $entryPoints,
+        ?StaticReflector $reflector = null,
     ): void {
-        $affectedIndices = FileLevelReach::affectedIndices($entryPoints, $changedFiles);
+        $directHits = array_fill_keys(
+            FileLevelReach::affectedIndices($entryPoints, $changedFiles),
+            true,
+        );
+
+        $transitiveHits = [];
+        if ($reflector !== null) {
+            $transitiveHits = array_fill_keys(
+                TransitiveReach::affectedIndices($entryPoints, $changedFiles, $reflector, $projectRoot),
+                true,
+            );
+        }
 
         $affected = [];
-        foreach ($affectedIndices as $idx) {
-            $ep = $entryPoints[$idx];
+        foreach ($entryPoints as $idx => $ep) {
+            $isDirect     = isset($directHits[$idx]);
+            $isTransitive = isset($transitiveHits[$idx]);
+            if (!$isDirect && !$isTransitive) {
+                continue;
+            }
             $affected[] = [
                 'kind' => $ep->kind,
                 'name' => $ep->name,
@@ -45,7 +69,7 @@ final class Blastradius
                     'line' => $ep->handlerLine,
                 ],
                 'extra' => $ep->extra ?? null,
-                'min_confidence' => 'NameOnly',
+                'min_confidence' => $isDirect ? 'NameOnly' : 'Transitive',
             ];
         }
 
