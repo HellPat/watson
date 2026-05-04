@@ -90,8 +90,17 @@ final class StaticReflector
             return [$handlerFqn, $file, $line];
         }
 
-        // Fall back to BetterReflection when ClassLoader doesn't know the
-        // class (anonymous / generated / vendor not in autoload).
+        // When the ClassLoader is in scope but didn't resolve the FQN it's
+        // almost always a Symfony service id (e.g. `web_profiler.controller.x`)
+        // or a synthetic name with no file backing — BetterReflection won't
+        // resolve it either, and trying makes us pay the staging-dir build
+        // for every dead controller. Bail with an empty location.
+        if ($this->classLoader !== null) {
+            return [$handlerFqn, '', 0];
+        }
+
+        // Fall back to BetterReflection only when no ClassLoader was supplied
+        // (anonymous / generated / vendor not in autoload).
         $class = $this->reflectClass($fqn);
         if ($class === null) {
             return [$handlerFqn, '', 0];
