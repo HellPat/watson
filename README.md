@@ -134,21 +134,14 @@ git diff --name-only origin/main...HEAD | vendor/bin/watson blastradius --scope=
 message handlers) AND every phpunit.test in the repo. Cross-reference: which affected
 entry points have at least one test that exercises them, and which don't?
 Output a markdown table; flag gaps as 'NEEDS COVERAGE'."
-
-
-# 4. Tight CI loop — routes only, one-line summary
-#    `--scope=routes` skips the messenger / jobs / tests scans.
-git diff --name-only origin/main...HEAD | vendor/bin/watson blastradius --scope=routes --format=md | llm \
-  --system "Summarise which user-facing routes change in this PR. One line each."
-
-
-# 5. Risk-rank the change
-#    Same input as (1), different rubric.
-git diff --name-only origin/main...HEAD | vendor/bin/watson blastradius --format=md | llm \
-  --system "Rate this PR's risk (low / med / high) and explain in 3 bullets.
-Consider: blast radius across kinds, whether async paths (jobs / message
-handlers) are involved, whether a test exists for every affected route."
 ```
+
+> For a plain list of affected routes / commands / risk surface, the
+> `--format=md` (or `text` / `tok`) output is the answer on its own — no
+> LLM needed. Pipe to an LLM only when you want something the raw output
+> can't give you: subjective judgement (risk, regression severity),
+> cross-referencing with an external source (tests, coverage,
+> observability), or written prose (testing guides).
 
 ### Post-release — observability MCP correlation
 
