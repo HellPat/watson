@@ -14,6 +14,7 @@ use PhpParser\NodeVisitor\NameResolver;
 use PhpParser\NodeVisitorAbstract;
 use PhpParser\ParserFactory;
 use Composer\Autoload\ClassLoader;
+use Watson\Core\Diff\ChangedSymbol;
 use Watson\Core\Entrypoint\EntryPoint;
 
 /**
@@ -48,20 +49,20 @@ final class TransitiveReach
     private const MAX_DEPTH_DEFAULT = 3;
 
     /**
-     * @param list<EntryPoint> $entryPoints
-     * @param list<string>     $changedFiles absolute paths
-     * @param int              $maxDepth     hops from any entry-point handler file we follow before stopping; bounded recall in exchange for a much sharper signal on real apps
-     * @return list<int>       indices into $entryPoints whose closure intersects the diff
+     * @param list<EntryPoint>     $entryPoints
+     * @param list<ChangedSymbol>  $changes
+     * @param int                  $maxDepth     hops from any entry-point handler file we follow before stopping; bounded recall in exchange for a much sharper signal on real apps
+     * @return array<int, list<string>> entry-point index → reach path of absolute file paths (handler-side first, changed file last)
      */
     public static function affectedIndices(
         array $entryPoints,
-        array $changedFiles,
+        array $changes,
         ClassLoader $classLoader,
         string $projectRoot,
         int $maxFiles = self::MAX_FILES_DEFAULT,
         int $maxDepth = self::MAX_DEPTH_DEFAULT,
     ): array {
-        if ($entryPoints === [] || $changedFiles === []) {
+        if ($entryPoints === [] || $changes === []) {
             return [];
         }
 
@@ -71,7 +72,7 @@ final class TransitiveReach
         }
         $vendorReal = realpath($projectRoot . '/vendor');
 
-        $changedSet = self::buildChangedSet($changedFiles);
+        $changedSet = self::buildChangedSet(array_map(fn (ChangedSymbol $c) => $c->filePath, $changes));
         if ($changedSet === []) {
             return [];
         }
@@ -90,18 +91,22 @@ final class TransitiveReach
             $maxDepth,
         );
 
-        // Step 2: invert and BFS backwards from the diff.
+        // Step 2: invert and BFS backwards from the diff while remembering
+        // each reached file's "next hop towards the diff" so we can later
+        // reconstruct a concrete reach path per affected entry point.
         $reverse = self::invert($forward);
-        $reachable = self::reverseClosure($changedSet, $reverse);
+        [$reachable, $nextHop] = self::reverseClosureWithNextHop($changedSet, $reverse);
 
-        // Step 3: mark entry points whose handler file is reachable.
+        // Step 3: build the index → path map for entry points whose handler
+        // file is in the reachable set.
         $hits = [];
         foreach ($entryPoints as $idx => $ep) {
             $real = realpath($ep->handlerPath);
-            $key = $real !== false ? $real : $ep->handlerPath;
-            if (isset($reachable[$key])) {
-                $hits[] = $idx;
+            $key  = $real !== false ? $real : $ep->handlerPath;
+            if (!isset($reachable[$key])) {
+                continue;
             }
+            $hits[$idx] = self::buildReachPath($key, $nextHop);
         }
         return $hits;
     }
@@ -195,17 +200,19 @@ final class TransitiveReach
     }
 
     /**
-     * Reverse BFS from $changedSet through $reverse. Files that don't
-     * appear in $reverse simply aren't reached from anything; that's
-     * fine — they only matter if they ARE in $changedSet themselves.
+     * Reverse BFS from $changedSet through $reverse, also recording each
+     * reached file's "next hop towards the diff" — for any caller `c`
+     * found via `c -> f`, `nextHop[c] = f`. That lets the caller
+     * reconstruct the exact path a handler took to reach a changed file.
      *
      * @param array<string, true>          $changedSet
      * @param array<string, list<string>>  $reverse
-     * @return array<string, true>
+     * @return array{0: array<string, true>, 1: array<string, string>}
      */
-    private static function reverseClosure(array $changedSet, array $reverse): array
+    private static function reverseClosureWithNextHop(array $changedSet, array $reverse): array
     {
         $reached = [];
+        $nextHop = [];
         $queue   = [];
         foreach ($changedSet as $f => $_) {
             $reached[$f] = true;
@@ -217,11 +224,36 @@ final class TransitiveReach
             foreach ($callers as $caller) {
                 if (!isset($reached[$caller])) {
                     $reached[$caller] = true;
+                    $nextHop[$caller] = $f;
                     $queue[]          = $caller;
                 }
             }
         }
-        return $reached;
+        return [$reached, $nextHop];
+    }
+
+    /**
+     * Walk the next-hop chain from $start until it hits a sink (file with
+     * no further hop — by construction that's a changed file). Returns the
+     * path INCLUDING $start at the head and the changed file at the tail.
+     *
+     * @param array<string, string> $nextHop
+     * @return list<string>
+     */
+    private static function buildReachPath(string $start, array $nextHop): array
+    {
+        $path  = [$start];
+        $cur   = $start;
+        $seen  = [$start => true];
+        while (isset($nextHop[$cur])) {
+            $cur = $nextHop[$cur];
+            if (isset($seen[$cur])) {
+                break;
+            }
+            $seen[$cur] = true;
+            $path[] = $cur;
+        }
+        return $path;
     }
 
     /**

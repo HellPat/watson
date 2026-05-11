@@ -8,10 +8,10 @@
 
 ```bash
 composer require --dev hellpat/watson
-git diff --name-only origin/main...HEAD | vendor/bin/watson blastradius --format=md
+git diff -W -U99999 origin/main...HEAD | vendor/bin/watson blastradius --unified-diff --format=md
 ```
 
-watson does not shell out to git. You pipe a file list (or a unified diff) in, watson tells you which framework entry points are reached. Works with `git diff`, `svn diff`, GitHub-Action diff payloads, or a hand-curated list.
+watson does not shell out to git. You pipe a diff in, watson tells you which framework entry points are reached — at **method** granularity, with comment-only and whitespace-only edits dropped at the AST layer. `-W` keeps each changed method whole inside the hunk; `-U99999` makes the hunk carry the full file so watson can AST-diff the two halves in memory. Works equally well with `git diff`, GitHub-Action diff payloads, or a hand-curated list.
 
 ---
 
@@ -204,16 +204,33 @@ No bundle, no service provider, no `config/bundles.php` entry. watson auto-detec
 
 ### `watson blastradius`
 
-Reads a list of changed files from stdin (or `--files=`) and reports which entry points reach them. watson does not run git; the caller is responsible for picking the diff source.
+Reads a diff from stdin (or `--files=`) and reports which entry points reach the changed *methods*. watson does not run git; the caller is responsible for picking the diff source.
 
-| input shape                                                              | when to use                                                            |
-| ---                                                                      | ---                                                                    |
-| `git diff --name-only <a>...<b> \| watson blastradius`                    | most common — pipe `git diff --name-only` output as one path per line  |
-| `git diff <a>...<b> \| watson blastradius --unified-diff`                 | full unified diff on stdin; watson extracts post-image filenames       |
-| `watson blastradius --files=path/a --files=path/b`                       | no git involved — pre-computed list, GitHub-Action payload, etc.       |
-| `git diff --cached --name-only \| watson blastradius`                     | staged-only review — `--cached` lives on the caller's `git`, not watson |
+| # | input shape | precision | what it does | use when |
+| - | --- | --- | --- | --- |
+| 1 | `git diff -W -U99999 <a>...<b> \| watson blastradius --unified-diff` | **method-level** | `git diff -W` expands every hunk to the **whole function** it touches; `-U99999` pads context to ∞ so the hunk carries the **full file**. watson reconstructs old + new file content in-memory from the diff, AST-parses both halves, and hashes each `Class::method` body (docblocks + comments stripped, whitespace normalised). Only methods with a different hash become `ChangedSymbol`s — comment-only and whitespace-only edits **never reach the reach engine**. | recommended path for PR reviews — gives you the trigger `Class::method` column and the lowest false-positive rate |
+| 2 | `git diff --name-only <a>...<b> \| watson blastradius` | file-level | watson reads one absolute path per line and emits a file-level `ChangedSymbol` (`class=null`, `method=null`) per file. Every entry point whose handler file *or* whose call-graph closure includes that file is flagged. Comment-only edits **are** flagged here because no AST diff happens. | when the caller can't produce a unified diff (CI runners with name-only payloads, GitHub Actions `paths` lists, etc.) |
+| 3 | `watson blastradius --files=path/a --files=path/b` | file-level | Same engine as row 2 but the path list comes from a repeatable `--files=` flag (also accepts comma-separated values). Stdin is ignored. | no git involved — pre-computed list, hand-curated paths, or webhook payloads |
+| 4 | `git diff --cached -W -U99999 \| watson blastradius --unified-diff` | method-level | Same recipe as row 1 but `--cached` makes git emit the **staged** diff (index vs `HEAD`). watson behaviour identical. | pre-commit / pre-push review of staged changes only |
+| 5 | `git diff -W -U99999 origin/main...HEAD \| watson blastradius --unified-diff --scope=routes --max-depth=1` | method-level | `--scope=routes` skips the message-handler / job / phpunit scans (cheapest possible run). `--max-depth=1` caps the indirect-reach BFS at one hop from each entry-point handler file → sharper signal, higher recall risk. | tight CI loops where you only want to know which **user-facing routes** changed |
 
 When run in an interactive shell with no input piped and no `--files`, watson exits with a usage hint instead of silently producing zero results.
+
+Each affected entry point comes back with an **`affected by changed`** column listing the trigger `Class::method` symbols. Reach kind is one of:
+
+- `🎯 direct` — the entry point's own handler file holds a changed symbol.
+- `🔗 indirect` — the handler reaches a changed file through its imports, `new`, static calls, or type hints. Depth is bounded by `--max-depth=N` (default `3`).
+
+#### Other flags
+
+| flag | default | what it does |
+| --- | --- | --- |
+| `--format=text\|md\|json\|tok` | `text` | output shape. `md` is tuned for PR descriptions / LLM prompts; `json` is the machine contract; `tok` is tab-separated for token-cheap LLM piping |
+| `--scope=routes\|all` | `all` | `routes` skips commands / jobs / message handlers / tests. Faster startup, smaller signal |
+| `--max-depth=N` | `3` | BFS hops the indirect-reach pass walks from each entry-point handler file before stopping. Lower = tighter signal, higher = more recall |
+| `--app-env=ENV` | `dev` | value passed to `bin/console` / `artisan` when collecting routes |
+| `--project=PATH` | walks up from `cwd` | force the project root rather than autodetecting |
+| `--base=REF` / `--head=REF` | none | cosmetic labels shown in the rendered envelope so consumers can correlate output to a diff range |
 
 ### `watson list-entrypoints`
 
@@ -287,16 +304,18 @@ watson is a CLI binary, not a bundle/provider. AST scans go through [`roave/bett
 
 ```mermaid
 flowchart TD
-  GD["git diff"] --> CF["changed files"]
+  GD["git diff -W -U99999"] --> CFR["ChangedFilesReader<br/>(reads stdin)"]
+  CFR --> ADM["AstDiffMapper<br/>old AST vs new AST per method<br/>(comments / whitespace ignored)"]
+  ADM --> CS["changed symbols<br/>Class::method (or Class::*)"]
 
   APP["target app"] --> ASK["ask framework<br/>(debug:router, debug:container,<br/>route:list, Laravel boot)"]
-  ASK --> EP["entry points"]
-  EP --> AST["AST → handler file:line<br/>(Better Reflection)"]
+  ASK --> EP["entry points<br/>Class::method"]
+  EP --> AST["AST → handler file:line<br/>(Composer ClassLoader + Better Reflection)"]
 
-  CF --> X(("intersect"))
-  AST --> X
-  X --> AEP["affected entry points"]
-  AEP --> R["render<br/>text / md / json / tok"]
+  AST --> RX(("reach BFS<br/>(file-graph, method-aware in Phase B)"))
+  CS --> RX
+  RX --> AEP["affected entry points<br/>+ trigger Class::method"]
+  AEP --> R["render<br/>text / md / json / tok<br/>('affected by changed' column,<br/>🔗 indirect badge)"]
 ```
 
 ---

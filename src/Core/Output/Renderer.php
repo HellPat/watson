@@ -4,11 +4,6 @@ declare(strict_types=1);
 
 namespace Watson\Core\Output;
 
-use Symfony\Component\Console\Helper\Table;
-use Symfony\Component\Console\Helper\TableStyle;
-use Symfony\Component\Console\Output\BufferedOutput;
-use Symfony\Component\Console\Output\OutputInterface;
-
 /**
  * One renderer to dispatch by `--format`. JSON is the contract for
  * downstream tooling; markdown is tuned for PR descriptions and AI
@@ -314,12 +309,12 @@ final class Renderer
                 foreach ($entries as $ep) {
                     $rows[] = [
                         self::formatName($ep['extra'] ?? null, $ep['name'] ?? '?'),
-                        self::formatHandler($ep['handler_fqn'] ?? '?', $ep['handler_path'] ?? '', (int) ($ep['handler_line'] ?? 0)),
+                        self::formatHandlerCell($ep['handler_fqn'] ?? '?', $ep['handler_path'] ?? '', (int) ($ep['handler_line'] ?? 0), null),
                     ];
                 }
                 $lines[] = sprintf('#### %s `%s` — %d', self::kindIcon($kind), $kind, count($entries));
                 $lines[] = '';
-                self::appendCodeFenceTable($lines, ['name', 'handler'], $rows);
+                self::appendGfmTable($lines, ['name', 'handler'], $rows);
                 $lines[] = '';
             }
 
@@ -338,18 +333,60 @@ final class Renderer
             foreach (self::groupByKind($affected) as $kind => $entries) {
                 $rows = [];
                 foreach ($entries as $ep) {
+                    /** @var list<string>|null $reachPath */
+                    $reachPath = isset($ep['reach_path']) && is_array($ep['reach_path']) ? array_values($ep['reach_path']) : null;
+                    /** @var list<array{symbol:string,file?:string,class:?string,method:?string}> $triggers */
+                    $triggers = isset($ep['triggered_by']) && is_array($ep['triggered_by']) ? $ep['triggered_by'] : [];
                     $rows[] = [
                         self::reachBadge($ep['min_confidence'] ?? null),
+                        self::formatTriggers($triggers),
                         self::formatName($ep['extra'] ?? null, $ep['name'] ?? '?'),
-                        self::formatHandler($ep['handler']['fqn'] ?? '?', $ep['handler']['path'] ?? '', (int) ($ep['handler']['line'] ?? 0)),
+                        self::formatHandlerCell(
+                            $ep['handler']['fqn'] ?? '?',
+                            $ep['handler']['path'] ?? '',
+                            (int) ($ep['handler']['line'] ?? 0),
+                            $reachPath,
+                        ),
                     ];
                 }
                 $lines[] = sprintf('#### %s `%s` — %d', self::kindIcon($kind), $kind, count($entries));
                 $lines[] = '';
-                self::appendCodeFenceTable($lines, ['reach', 'name', 'handler'], $rows);
+                self::appendGfmTable($lines, ['reach', 'affected by changed', 'name', 'handler'], $rows);
                 $lines[] = '';
             }
         }
+    }
+
+    /**
+     * Append a GitHub-flavoured-markdown table. GFM doesn't allow literal
+     * `|` or newlines inside cells, so callers MUST encode line breaks as
+     * `<br>` and pre-escape pipes — `formatHandlerCell` does both.
+     *
+     * @param-out list<string>      $lines
+     * @param list<string>          $headers
+     * @param list<list<string>>    $rows
+     */
+    private static function appendGfmTable(array &$lines, array $headers, array $rows): void
+    {
+        $lines[] = '| ' . implode(' | ', $headers) . ' |';
+        $lines[] = '|' . str_repeat('---|', count($headers));
+        foreach ($rows as $row) {
+            $cells = [];
+            foreach ($row as $cell) {
+                $cells[] = self::escapeGfmCell($cell);
+            }
+            $lines[] = '| ' . implode(' | ', $cells) . ' |';
+        }
+    }
+
+    private static function escapeGfmCell(string $cell): string
+    {
+        // GFM table cells can't contain literal pipes or newlines. Pipes
+        // inside `<details>` (e.g. inside route names like `GET|POST /x`)
+        // need to be escaped so the table parser doesn't see a column break.
+        // Newlines are allowed only as `<br>`.
+        $cell = str_replace(["\r\n", "\n", "\r"], '<br>', $cell);
+        return str_replace('|', '\\|', $cell);
     }
 
     private static function reachLegend(): string
@@ -357,50 +394,35 @@ final class Renderer
         return '<sub>'
             . '🎯 `direct` — entry point\'s own handler file is in the diff'
             . ' &nbsp;·&nbsp; '
-            . '🔗 `transitive` — handler reaches a changed file through its imports / `new` / static calls / type hints'
+            . '🔗 `indirect` — handler reaches a changed file through its imports / `new` / static calls / type hints'
             . '</sub>';
     }
 
     /**
-     * Render a Symfony Console `Table` with the box-drawing UTF-8 style and
-     * append it inside a fenced code block — markdown viewers (GitHub PRs,
-     * VS Code preview, Bitbucket) keep the fixed-width grid aligned and the
-     * box characters stay sharp at any zoom level. We use a `BufferedOutput`
-     * to capture the rendered string without touching stdout.
+     * Render the trigger cell ("affected by changed"). Symbol-only, one
+     * per line. Falls back to "—" when no trigger was attributed (should
+     * be rare; happens for file-level changes when running in
+     * `--name-only` mode).
      *
-     * @param list<string>            $headers
-     * @param list<list<string>>      $rows
-     * @param-out list<string>        $lines
+     * @param list<array{symbol:string,class:?string,method:?string}> $triggers
      */
-    private static function appendCodeFenceTable(array &$lines, array $headers, array $rows): void
+    private static function formatTriggers(array $triggers): string
     {
-        $buffer = new BufferedOutput(OutputInterface::VERBOSITY_NORMAL, false);
-        $table  = new Table($buffer);
-        $table->setHeaders($headers);
-        $table->setRows($rows);
-        $table->setStyle(self::watsonTableStyle());
-        $table->render();
-
-        $rendered = rtrim($buffer->fetch(), "\n");
-        $lines[]  = '```text';
-        foreach (explode("\n", $rendered) as $row) {
-            $lines[] = $row;
+        if ($triggers === []) {
+            return '—';
         }
-        $lines[] = '```';
-    }
+        $parts = [];
+        $seen  = [];
+        foreach ($triggers as $t) {
+            $sym = (string) ($t['symbol'] ?? '');
+            if ($sym === '' || isset($seen[$sym])) {
+                continue;
+            }
+            $seen[$sym] = true;
+            $parts[] = '<code>' . $sym . '</code>';
+        }
 
-    private static function watsonTableStyle(): TableStyle
-    {
-        // UTF-8 box-drawing — the default `box` style with light verticals
-        // so wide tables still feel readable in PR comments. Created on
-        // demand because TableStyle isn't immutable.
-        $style = new TableStyle();
-        $style
-            ->setHorizontalBorderChars('─')
-            ->setVerticalBorderChars('│')
-            ->setDefaultCrossingChar('┼')
-            ->setCrossingChars('┼', '┌', '┬', '┐', '┤', '┘', '┴', '└', '├');
-        return $style;
+        return implode('<br>', $parts);
     }
 
     private static function kindIcon(string $kind): string
@@ -421,9 +443,9 @@ final class Renderer
     private static function reachBadge(?string $confidence): string
     {
         return match ($confidence) {
-            'NameOnly'   => '🎯 direct',
-            'Transitive' => '🔗 transitive',
-            default      => '·',
+            'NameOnly'             => '🎯 direct',
+            'Indirect', 'Transitive' => '🔗 indirect',
+            default                => '·',
         };
     }
 
@@ -446,6 +468,36 @@ final class Renderer
             return $fqn;
         }
         return sprintf('%s (%s:%d)', $fqn, $path, $line);
+    }
+
+    /**
+     * Render the handler cell for a GFM table row. Direct hits show just
+     * `FQN (path:line)`. Transitive hits append a collapsed `<details>`
+     * block whose summary is "↳ N hops" and whose body is an arrow-joined
+     * list of file paths from the handler to the changed file. Lets a
+     * reviewer scan the table at width and expand only the rows where the
+     * call chain actually matters.
+     *
+     * @param list<string>|null $reachPath
+     */
+    private static function formatHandlerCell(string $fqn, string $path, int $line, ?array $reachPath): string
+    {
+        $head = self::formatHandler($fqn, $path, $line);
+        if ($reachPath === null || $reachPath === []) {
+            return $head;
+        }
+        $hops  = count($reachPath);
+        $chain = '<code>' . $path . '</code>';
+        foreach ($reachPath as $step) {
+            $chain .= '<br>↳ <code>' . $step . '</code>';
+        }
+        return sprintf(
+            '%s<br><details><summary>↳ %d hop%s</summary>%s</details>',
+            $head,
+            $hops,
+            $hops === 1 ? '' : 's',
+            $chain,
+        );
     }
 
     /** @param list<array<string,mixed>> $lines */

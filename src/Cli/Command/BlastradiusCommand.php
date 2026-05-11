@@ -14,6 +14,7 @@ use Watson\Cli\EntrypointResolver;
 use Watson\Cli\ProjectDetector;
 use Watson\Core\Analysis\Blastradius;
 use Watson\Core\Diff\ChangedFilesReader;
+use Watson\Core\Diff\ChangedSymbol;
 use Watson\Core\Output\Envelope;
 use Watson\Core\Output\Renderer;
 
@@ -36,12 +37,14 @@ final class BlastradiusCommand extends Command
             ->addOption('app-env', null, InputOption::VALUE_REQUIRED, 'APP_ENV passed to bin/console / artisan', 'dev')
             ->addOption('max-depth', null, InputOption::VALUE_REQUIRED, 'Maximum BFS hops the transitive-reach pass walks from any entry point. Lower = tighter signal, higher = more recall.', '3')
             ->setHelp(<<<HELP
-                Reads the list of changed files from stdin (one path per line) and reports which framework entry points reach those files.
+                Reads the diff from stdin and reports which framework entry points reach the changed methods.
 
-                Examples:
+                Recommended (full method-level precision, drops comment-only / whitespace-only edits):
+                  git diff -W -U99999 origin/main...HEAD | watson blastradius --unified-diff
+
+                Coarser fallbacks (file-level only):
                   git diff --name-only origin/main...HEAD | watson blastradius
-                  git diff --cached --name-only             | watson blastradius
-                  git diff origin/main...HEAD                | watson blastradius --unified-diff
+                  git diff --cached --name-only           | watson blastradius
                   watson blastradius --files=app/X.php --files=app/Y.php
 
                 watson does NOT shell out to git itself. The caller picks the diff source.
@@ -56,8 +59,8 @@ final class BlastradiusCommand extends Command
         /** @var list<string> $filesFlag */
         $filesFlag = (array) $input->getOption('files');
         $unifiedDiff = (bool) $input->getOption('unified-diff');
-        $changedFiles = self::collectChangedFiles($project->rootPath, $filesFlag, $unifiedDiff, $output);
-        if ($changedFiles === null) {
+        $changes = self::collectChangedSymbols($project->rootPath, $filesFlag, $unifiedDiff, $output);
+        if ($changes === null) {
             return self::INVALID;
         }
 
@@ -78,15 +81,15 @@ final class BlastradiusCommand extends Command
 
         if ($output->isVerbose()) {
             $output->writeln(sprintf(
-                '<comment>watson: %d entry points · %d changed files</comment>',
+                '<comment>watson: %d entry points · %d changed symbols</comment>',
                 count($eps),
-                count($changedFiles),
+                count($changes),
             ));
         }
 
         $classLoader = self::loadConsumerClassLoader($project->rootPath);
         $maxDepth    = max(0, (int) $input->getOption('max-depth'));
-        Blastradius::run($envelope, $project->rootPath, $changedFiles, $eps, $classLoader, $maxDepth);
+        Blastradius::run($envelope, $project->rootPath, $changes, $eps, $classLoader, $maxDepth);
 
         $output->write(Renderer::render((string) $input->getOption('format'), $envelope));
 
@@ -95,16 +98,18 @@ final class BlastradiusCommand extends Command
 
     /**
      * @param list<string> $filesFlag
-     * @return list<string>|null  null = caller error (already printed); list = the changed-files set (possibly empty)
+     * @return list<ChangedSymbol>|null  null = caller error (already printed); list = changed-symbol set (possibly empty)
      */
-    private static function collectChangedFiles(
+    private static function collectChangedSymbols(
         string $projectRoot,
         array $filesFlag,
         bool $unifiedDiff,
         OutputInterface $output,
     ): ?array {
         if ($filesFlag !== []) {
-            return ChangedFilesReader::readFromFlag($filesFlag, $projectRoot);
+            return ChangedFilesReader::fileLevelSymbols(
+                ChangedFilesReader::readFromFlag($filesFlag, $projectRoot),
+            );
         }
 
         $stdin = defined('STDIN') ? STDIN : fopen('php://stdin', 'r');
@@ -121,9 +126,13 @@ final class BlastradiusCommand extends Command
             return null;
         }
 
-        return $unifiedDiff
-            ? ChangedFilesReader::readUnifiedDiff($stdin, $projectRoot)
-            : ChangedFilesReader::readNameOnly($stdin, $projectRoot);
+        if ($unifiedDiff) {
+            return ChangedFilesReader::readUnifiedDiffSymbols($stdin, $projectRoot);
+        }
+
+        return ChangedFilesReader::fileLevelSymbols(
+            ChangedFilesReader::readNameOnly($stdin, $projectRoot),
+        );
     }
 
     /**
@@ -144,11 +153,13 @@ final class BlastradiusCommand extends Command
 
     private static function printUsage(OutputInterface $output): void
     {
-        $output->writeln('<error>watson blastradius needs a list of changed files on stdin.</error>');
+        $output->writeln('<error>watson blastradius needs a diff on stdin.</error>');
         $output->writeln('');
-        $output->writeln('Examples:');
+        $output->writeln('Recommended (drops comment-only / whitespace-only edits):');
+        $output->writeln('  git diff -W -U99999 origin/main...HEAD | watson blastradius --unified-diff');
+        $output->writeln('');
+        $output->writeln('Coarser fallbacks:');
         $output->writeln('  git diff --name-only origin/main...HEAD | watson blastradius');
-        $output->writeln('  git diff origin/main...HEAD             | watson blastradius --unified-diff');
         $output->writeln('  watson blastradius --files=app/X.php --files=app/Y.php');
     }
 }

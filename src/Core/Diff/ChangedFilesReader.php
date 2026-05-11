@@ -5,21 +5,67 @@ declare(strict_types=1);
 namespace Watson\Core\Diff;
 
 /**
- * Read a list of changed files from one of three callable shapes:
+ * Read the set of changed symbols from one of three callable shapes:
  *
  *   - newline-separated paths on stdin (`git diff --name-only … | watson …`)
- *   - a unified diff on stdin (`git diff … | watson … --unified-diff`)
- *   - explicit `--files=` flag values
+ *     → file-level {@see ChangedSymbol}s (no method granularity).
+ *   - a unified diff on stdin (`git diff -W -U99999 … | watson … --unified-diff`)
+ *     → AST-diffed method-level symbols via {@see AstDiffMapper}.
+ *   - explicit `--files=` flag values → file-level symbols.
  *
  * Watson never shells out to git itself — this reader is the only seam
- * between the upstream diff source and the blastradius engine. All three
- * functions return absolute paths, resolved against `$projectRoot` for
- * any relative inputs, so downstream `FileLevelReach::affectedIndices()`
- * can compare on `realpath()` output regardless of where the caller ran
- * `git diff` from.
+ * between the upstream diff source and the blastradius engine.
+ *
+ * Recipe for full precision (single canonical path):
+ *
+ *     git diff -W -U99999 <ref> | watson blastradius --unified-diff
+ *
+ * `-W` keeps each changed method whole inside the hunk; `-U99999` makes
+ * the hunk carry the full file so watson can reconstruct both halves in
+ * memory and AST-diff them. Comment-only and whitespace-only edits are
+ * dropped at this layer.
  */
 final class ChangedFilesReader
 {
+    /**
+     * Read a unified diff (must be `git diff -W -U99999`) into a list of
+     * method-level {@see ChangedSymbol}s. Whitespace-only and comment-only
+     * edits inside method bodies are dropped via AST hashing.
+     *
+     * @param resource $stream
+     * @return list<ChangedSymbol>
+     */
+    public static function readUnifiedDiffSymbols($stream, string $projectRoot): array
+    {
+        $diff = stream_get_contents($stream);
+        if (!is_string($diff) || $diff === '') {
+            return [];
+        }
+
+        return AstDiffMapper::map($diff, $projectRoot);
+    }
+
+    /**
+     * Wrap a list of file paths as file-level {@see ChangedSymbol}s
+     * (`classFqn = null`, `methodName = null`). Used when the caller has no
+     * diff to give (name-only mode, `--files=` flag).
+     *
+     * @param list<string> $paths absolute paths
+     * @return list<ChangedSymbol>
+     */
+    public static function fileLevelSymbols(array $paths): array
+    {
+        $out = [];
+        foreach ($paths as $p) {
+            if ($p === '') {
+                continue;
+            }
+            $out[] = new ChangedSymbol($p, null, null, 1, 1);
+        }
+
+        return $out;
+    }
+
     /**
      * Newline-list parser. Empty lines and `#`-prefixed comments are
      * skipped — consistent with git porcelain (`git status --porcelain`,
