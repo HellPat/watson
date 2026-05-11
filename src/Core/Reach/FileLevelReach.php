@@ -4,28 +4,34 @@ declare(strict_types=1);
 
 namespace Watson\Core\Reach;
 
+use Watson\Core\Diff\ChangedSymbol;
 use Watson\Core\Entrypoint\EntryPoint;
 
 /**
  * The file-level reach pass that turned out to be watson's most useful
  * signal on real Laravel apps with heavy interface-DI: forget the static
  * call graph, just check whether each entry point's handler file is in
- * the diff. If yes, the entry point is potentially affected.
+ * the change set. If yes, the entry point is potentially affected.
  *
- * High recall, modest precision (a docblock-only edit shows up). Consumers
- * filter by confidence.
+ * High recall, modest precision (a docblock-only edit no longer shows up
+ * since {@see \Watson\Core\Diff\AstDiffMapper} drops it before this layer
+ * sees it). Consumers filter by confidence.
  */
 final class FileLevelReach
 {
     /**
-     * @param list<EntryPoint> $entryPoints
-     * @param list<string> $changedFiles absolute paths
+     * @param list<EntryPoint>     $entryPoints
+     * @param list<ChangedSymbol>  $changes
      * @return list<int> indices into `$entryPoints` for affected entries
      */
-    public static function affectedIndices(array $entryPoints, array $changedFiles): array
+    public static function affectedIndices(array $entryPoints, array $changes): array
     {
         $changedSet = [];
-        foreach ($changedFiles as $f) {
+        foreach ($changes as $cs) {
+            $f = $cs->filePath;
+            if ($f === '') {
+                continue;
+            }
             $real = realpath($f);
             if ($real !== false) {
                 $changedSet[$real] = true;

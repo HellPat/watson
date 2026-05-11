@@ -35,28 +35,22 @@ final class RendererTest extends TestCase
         $this->assertLessThan($commandPos, $routePos);
     }
 
-    public function testMarkdownRendersFencedSymfonyTableWithIconsAndReachBadge(): void
+    public function testMarkdownRendersGfmTableWithIconsAndReachBadge(): void
     {
         $envelope = self::sampleBlastradiusEnvelope();
-        $envelope = self::withConfidence($envelope, ['NameOnly', 'Transitive']);
+        $envelope = self::withConfidence($envelope, ['NameOnly', 'Indirect']);
         $out = Renderer::render(Renderer::FORMAT_MD, $envelope);
 
-        // Each kind block is wrapped in a fenced code block.
-        $this->assertStringContainsString("```text\n", $out);
-        // Symfony Table column headers (from box-style render).
-        $this->assertStringContainsString('reach', $out);
-        $this->assertStringContainsString('name', $out);
-        $this->assertStringContainsString('handler', $out);
-        // UTF-8 box-drawing characters from our table style.
-        $this->assertStringContainsString('┌', $out);
-        $this->assertStringContainsString('│', $out);
-        $this->assertStringContainsString('└', $out);
+        // GFM table headers (pipe-delimited).
+        $this->assertStringContainsString('| reach | affected by changed | name | handler |', $out);
+        // GFM separator row.
+        $this->assertStringContainsString('|---|---|---|---|', $out);
         // Kind icons next to the kind label.
         $this->assertStringContainsString('🛣️', $out);
         $this->assertStringContainsString('⌨️', $out);
         // Reach badges (no backticks inside table cells).
         $this->assertStringContainsString('🎯 direct', $out);
-        $this->assertStringContainsString('🔗 transitive', $out);
+        $this->assertStringContainsString('🔗 indirect', $out);
         // Handler FQN + path:line on a single line inside the cell.
         $this->assertStringContainsString('App\\HomeController::index (src/HomeController.php:8)', $out);
     }
@@ -94,6 +88,40 @@ final class RendererTest extends TestCase
         $this->assertStringContainsString('# files=2 affected=2', $out);
         $this->assertStringContainsString("\nsr\thome\t", $out);
         $this->assertStringContainsString("\nsc\tapp:ping\t", $out);
+    }
+
+    public function testMarkdownAffectedByChangedShowsTriggerSymbols(): void
+    {
+        $envelope = new Envelope(language: 'php', framework: 'symfony', rootPath: '/x', base: 'main', head: 'HEAD');
+        $envelope->pushAnalysis('blastradius', '0.4.0', [
+            'summary' => ['files_changed' => 1, 'symbols_changed' => 1, 'entry_points_affected' => 1],
+            'affected_entry_points' => [
+                [
+                    'kind' => 'symfony.route',
+                    'name' => 'home',
+                    'handler' => ['fqn' => 'App\\HomeController::index', 'path' => 'src/HomeController.php', 'line' => 8],
+                    'extra' => ['path' => '/', 'methods' => ['GET']],
+                    'min_confidence' => 'Indirect',
+                    'triggered_by' => [
+                        ['symbol' => 'App\\Service\\ProductService::userRankedPluNumbers', 'class' => 'App\\Service\\ProductService', 'method' => 'userRankedPluNumbers'],
+                    ],
+                ],
+            ],
+        ]);
+        $out = Renderer::render(Renderer::FORMAT_MD, $envelope);
+
+        $this->assertStringContainsString('| reach | affected by changed | name | handler |', $out);
+        $this->assertStringContainsString('App\\Service\\ProductService::userRankedPluNumbers', $out);
+        $this->assertStringContainsString('🔗 indirect', $out);
+    }
+
+    public function testReachLegendUsesIndirectLabel(): void
+    {
+        $envelope = self::sampleBlastradiusEnvelope();
+        $out = Renderer::render(Renderer::FORMAT_MD, $envelope);
+
+        $this->assertStringContainsString('🔗 `indirect`', $out);
+        $this->assertStringNotContainsString('🔗 `transitive`', $out);
     }
 
     public function testUnknownFormatThrows(): void

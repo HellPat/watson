@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Watson\Tests\Core\Reach;
 
 use PHPUnit\Framework\TestCase;
+use Watson\Core\Diff\ChangedSymbol;
 use Watson\Core\Entrypoint\EntryPoint;
 use Watson\Core\Entrypoint\Source;
 use Watson\Core\Reach\FileLevelReach;
@@ -27,7 +28,7 @@ final class FileLevelReachTest extends TestCase
                 self::ep($tmp . '/Untouched.php'),
             ];
 
-            $hits = FileLevelReach::affectedIndices($eps, [$a]);
+            $hits = FileLevelReach::affectedIndices($eps, [self::cs($a)]);
 
             $this->assertSame([0], $hits);
         } finally {
@@ -50,7 +51,12 @@ final class FileLevelReachTest extends TestCase
 
         // Deleted files in the diff have no realpath; reach must still
         // match them by raw string so blastradius reports them.
-        $this->assertSame([0], FileLevelReach::affectedIndices($eps, [$deleted]));
+        $this->assertSame([0], FileLevelReach::affectedIndices($eps, [self::cs($deleted)]));
+    }
+
+    private static function cs(string $path): ChangedSymbol
+    {
+        return new ChangedSymbol($path, null, null, 1, 1);
     }
 
     private static function ep(string $path): EntryPoint

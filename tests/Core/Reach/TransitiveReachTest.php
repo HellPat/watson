@@ -6,6 +6,7 @@ namespace Watson\Tests\Core\Reach;
 
 use PHPUnit\Framework\TestCase;
 use Composer\Autoload\ClassLoader;
+use Watson\Core\Diff\ChangedSymbol;
 use Watson\Core\Entrypoint\EntryPoint;
 use Watson\Core\Entrypoint\Source;
 use Watson\Core\Reach\TransitiveReach;
@@ -53,9 +54,9 @@ final class TransitiveReachTest extends TestCase
         $reflector = $this->makeLoader();
         $eps       = [$this->ep('App\\Jobs\\MyJob', $job)];
 
-        $hits = TransitiveReach::affectedIndices($eps, [$service], $reflector, $this->project);
+        $hits = TransitiveReach::affectedIndices($eps, [self::cs($service)], $reflector, $this->project);
 
-        self::assertSame([0], $hits);
+        self::assertSame([0], array_keys($hits));
     }
 
     public function testIgnoresEntryPointWhenNoTransitiveOverlapWithDiff(): void
@@ -80,7 +81,7 @@ final class TransitiveReachTest extends TestCase
         $reflector = $this->makeLoader();
         $eps       = [$this->ep('App\\Jobs\\MyJob', $job)];
 
-        $hits = TransitiveReach::affectedIndices($eps, [$other], $reflector, $this->project);
+        $hits = TransitiveReach::affectedIndices($eps, [self::cs($other)], $reflector, $this->project);
 
         self::assertSame([], $hits);
     }
@@ -107,9 +108,9 @@ final class TransitiveReachTest extends TestCase
         $reflector = $this->makeLoader();
         $eps       = [$this->ep('App\\Jobs\\MyJob', $job)];
 
-        $hits = TransitiveReach::affectedIndices($eps, [$service], $reflector, $this->project);
+        $hits = TransitiveReach::affectedIndices($eps, [self::cs($service)], $reflector, $this->project);
 
-        self::assertSame([0], $hits);
+        self::assertSame([0], array_keys($hits));
     }
 
     public function testFollowsTypeHintInMethodSignature(): void
@@ -130,9 +131,9 @@ final class TransitiveReachTest extends TestCase
         $reflector = $this->makeLoader();
         $eps       = [$this->ep('App\\Jobs\\MyJob', $job)];
 
-        $hits = TransitiveReach::affectedIndices($eps, [$service], $reflector, $this->project);
+        $hits = TransitiveReach::affectedIndices($eps, [self::cs($service)], $reflector, $this->project);
 
-        self::assertSame([0], $hits);
+        self::assertSame([0], array_keys($hits));
     }
 
     public function testFollowsTransitiveChainTwoHopsDeep(): void
@@ -159,9 +160,9 @@ final class TransitiveReachTest extends TestCase
         $reflector = $this->makeLoader();
         $eps       = [$this->ep('App\\Jobs\\MyJob', $job)];
 
-        $hits = TransitiveReach::affectedIndices($eps, [$mapper], $reflector, $this->project);
+        $hits = TransitiveReach::affectedIndices($eps, [self::cs($mapper)], $reflector, $this->project);
 
-        self::assertSame([0], $hits);
+        self::assertSame([0], array_keys($hits));
     }
 
     public function testIgnoresUnusedImports(): void
@@ -192,8 +193,8 @@ final class TransitiveReachTest extends TestCase
 
         // A change in the Unused class must not flag the job — only
         // a change in MyService should.
-        self::assertSame([], TransitiveReach::affectedIndices($eps, [$other], $reflector, $this->project));
-        self::assertSame([0], TransitiveReach::affectedIndices($eps, [$service], $reflector, $this->project));
+        self::assertSame([], array_keys(TransitiveReach::affectedIndices($eps, [self::cs($other)], $reflector, $this->project)));
+        self::assertSame([0], array_keys(TransitiveReach::affectedIndices($eps, [self::cs($service)], $reflector, $this->project)));
     }
 
     public function testReturnsEmptyWhenNoChangedFiles(): void
@@ -201,6 +202,11 @@ final class TransitiveReachTest extends TestCase
         $reflector = $this->makeLoader();
         $eps       = [$this->ep('App\\Jobs\\MyJob', $this->project . '/app/Jobs/MyJob.php')];
         self::assertSame([], TransitiveReach::affectedIndices($eps, [], $reflector, $this->project));
+    }
+
+    private static function cs(string $path): ChangedSymbol
+    {
+        return new ChangedSymbol($path, null, null, 1, 1);
     }
 
     private function makeLoader(): ClassLoader
