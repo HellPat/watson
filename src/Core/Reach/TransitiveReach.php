@@ -62,131 +62,183 @@ final class TransitiveReach
             return [];
         }
 
-        $graph = MethodResolver::build($seeds, $classLoader, $projectRoot, $maxFiles);
+        $graph   = MethodResolver::build($seeds, $classLoader, $projectRoot, $maxFiles);
+        $targets = self::buildTargetIndex($changes, $graph);
+        [$reachable, $queue] = self::seedReachable($targets);
+        self::propagateClassAndNameOnlyEdges($graph, $targets, $reachable, $queue);
+        $nextHop = self::reverseBfs($graph, $reachable, $queue, $maxDepth);
 
-        // Build the target-symbol set + matching ChangedSymbol[] for each.
-        // - Class::method changes target one node.
-        // - Class::* changes target a wildcard for that class.
-        // - File-level changes (class=null, method=null) target every
-        //   symbol defined in that file (best-effort via fileSymbols).
-        /** @var array<string, list<ChangedSymbol>> $targetTriggers */
-        $targetTriggers = [];
-        /** @var array<string, list<ChangedSymbol>> $classLevelTargets class=>changes */
-        $classLevelTargets = [];
-        /** @var array<string, list<ChangedSymbol>> $methodNameTargets methodName => changes */
-        $methodNameTargets = [];
+        return self::mapEntryPoints($entryPoints, $reachable, $nextHop);
+    }
+
+    /**
+     * Translate the diff's ChangedSymbol set into three lookup tables
+     * keyed by graph identity. Done once up-front so the reverse pass
+     * is a cheap hashmap probe per edge.
+     *
+     * @param list<ChangedSymbol> $changes
+     * @return array{
+     *     exact: array<string, list<ChangedSymbol>>,
+     *     classLevel: array<string, list<ChangedSymbol>>,
+     *     methodName: array<string, list<ChangedSymbol>>,
+     * }
+     */
+    private static function buildTargetIndex(array $changes, SymbolGraph $graph): array
+    {
+        $exact = [];
+        $classLevel = [];
+        $methodName = [];
 
         foreach ($changes as $cs) {
             if ($cs->classFqn !== null && $cs->methodName !== null) {
                 $sym = $cs->classFqn . '::' . $cs->methodName;
-                $targetTriggers[$sym][] = $cs;
-                $classLevelTargets[$cs->classFqn][] = $cs;
-                $methodNameTargets[$cs->methodName][] = $cs;
+                $exact[$sym][] = $cs;
+                $classLevel[$cs->classFqn][] = $cs;
+                $methodName[$cs->methodName][] = $cs;
                 continue;
             }
             if ($cs->classFqn !== null) {
-                $classLevelTargets[$cs->classFqn][] = $cs;
+                $classLevel[$cs->classFqn][] = $cs;
                 continue;
             }
             // File-level change — expand to every symbol the graph
             // recorded for this file.
-            $absCandidates = [$cs->filePath];
-            $real = realpath($cs->filePath);
-            if ($real !== false) {
-                $absCandidates[] = $real;
-            }
-            foreach ($absCandidates as $abs) {
-                foreach ($graph->symbolsInFile($abs) as $sym) {
-                    $targetTriggers[$sym][] = $cs;
-                    [$cls, $tail] = self::split($sym);
-                    if ($cls !== null) {
-                        $classLevelTargets[$cls][] = $cs;
-                        if ($tail !== null && $tail !== '*') {
-                            $methodNameTargets[$tail][] = $cs;
-                        }
+            foreach (self::resolveFileSymbols($cs->filePath, $graph) as $sym) {
+                $exact[$sym][] = $cs;
+                [$cls, $tail] = self::split($sym);
+                if ($cls !== null) {
+                    $classLevel[$cls][] = $cs;
+                    if ($tail !== null && $tail !== '*') {
+                        $methodName[$tail][] = $cs;
                     }
                 }
             }
         }
 
-        // Reverse BFS — for each caller symbol, walk all callers that
-        // emit an edge to ANY target. Carry the originating ChangedSymbol
-        // through the chain.
+        return ['exact' => $exact, 'classLevel' => $classLevel, 'methodName' => $methodName];
+    }
 
-        /** @var array<string, list<string>> $reverse callee → list of callers */
-        $reverse = self::invertEdges($graph);
+    /**
+     * @return list<string>
+     */
+    private static function resolveFileSymbols(string $filePath, SymbolGraph $graph): array
+    {
+        $candidates = [$filePath];
+        $real = realpath($filePath);
+        if ($real !== false) {
+            $candidates[] = $real;
+        }
+        $out = [];
+        foreach ($candidates as $abs) {
+            foreach ($graph->symbolsInFile($abs) as $sym) {
+                $out[$sym] = true;
+            }
+        }
+        return array_keys($out);
+    }
 
-        /** @var array<string, list<ChangedSymbol>> $reachableTriggers */
-        $reachableTriggers = [];
-        /** @var array<string, string> $nextHop caller → next-hop towards a changed symbol */
-        $nextHop = [];
-
-        // Seed reachable with direct target hits.
+    /**
+     * Seed the reachable map with direct (exact) target hits.
+     *
+     * @param array{exact: array<string, list<ChangedSymbol>>, classLevel: array<string, list<ChangedSymbol>>, methodName: array<string, list<ChangedSymbol>>} $targets
+     * @return array{0: array<string, list<ChangedSymbol>>, 1: list<string>}
+     */
+    private static function seedReachable(array $targets): array
+    {
+        $reachable = [];
         $queue = [];
-        foreach ($targetTriggers as $sym => $trigs) {
-            $reachableTriggers[$sym] = $trigs;
+        foreach ($targets['exact'] as $sym => $triggers) {
+            $reachable[$sym] = $triggers;
             $queue[] = $sym;
         }
+        return [$reachable, $queue];
+    }
 
-        // Apply class-level + method-name target propagation in one pass
-        // over the graph edges (cheaper than per-step BFS lookup).
+    /**
+     * Single linear pass over every graph edge: when an edge's target
+     * class is in the changed-class set, or its NameOnly suffix matches
+     * a changed method name, propagate the originating trigger(s) onto
+     * the caller. Cheaper than running this check per BFS step.
+     *
+     * @param array{exact: array<string, list<ChangedSymbol>>, classLevel: array<string, list<ChangedSymbol>>, methodName: array<string, list<ChangedSymbol>>} $targets
+     * @param array<string, list<ChangedSymbol>> $reachable in-out
+     * @param list<string> $queue in-out
+     */
+    private static function propagateClassAndNameOnlyEdges(SymbolGraph $graph, array $targets, array &$reachable, array &$queue): void
+    {
         foreach ($graph->edges as $caller => $edges) {
             foreach ($edges as $edge) {
-                $matchedTriggers = self::matchEdge($edge, $classLevelTargets, $methodNameTargets);
-                if ($matchedTriggers === []) {
+                $matched = self::matchEdge($edge, $targets['classLevel'], $targets['methodName']);
+                if ($matched === []) {
                     continue;
                 }
-                if (!isset($reachableTriggers[$caller])) {
-                    $reachableTriggers[$caller] = $matchedTriggers;
+                if (!isset($reachable[$caller])) {
+                    $reachable[$caller] = $matched;
                     $queue[] = $caller;
                 } else {
-                    $reachableTriggers[$caller] = self::mergeTriggers($reachableTriggers[$caller], $matchedTriggers);
+                    $reachable[$caller] = self::mergeTriggers($reachable[$caller], $matched);
                 }
             }
         }
+    }
 
-        // Standard reverse BFS over `caller -> callee` edges to propagate
-        // reachability up the chain.
+    /**
+     * Standard reverse-BFS over `caller -> callee` edges. Each newly
+     * discovered caller inherits the triggers of the callee it reaches.
+     *
+     * @param array<string, list<ChangedSymbol>> $reachable in-out
+     * @param list<string> $queue in-out
+     * @return array<string, string> caller → next-hop callee (for path reconstruction)
+     */
+    private static function reverseBfs(SymbolGraph $graph, array &$reachable, array &$queue, int $maxDepth): array
+    {
+        $reverse = self::invertEdges($graph);
         $depth = [];
         foreach ($queue as $seed) {
             $depth[$seed] = 0;
         }
+        $nextHop = [];
         while ($queue !== []) {
             $sym = array_shift($queue);
             $d = $depth[$sym] ?? 0;
             if ($d >= $maxDepth) {
                 continue;
             }
-            $callers = $reverse[$sym] ?? [];
-            foreach ($callers as $caller) {
-                if (isset($reachableTriggers[$caller])) {
-                    // Already discovered via a shorter or equal path.
-                    continue;
+            foreach ($reverse[$sym] ?? [] as $caller) {
+                if (isset($reachable[$caller])) {
+                    continue; // already discovered via a shorter or equal path
                 }
-                $reachableTriggers[$caller] = $reachableTriggers[$sym];
+                $reachable[$caller] = $reachable[$sym];
                 $nextHop[$caller] = $sym;
                 $depth[$caller] = $d + 1;
                 $queue[] = $caller;
             }
         }
+        return $nextHop;
+    }
 
-        // Map entry points to their `Class::method` graph symbol and
-        // build the per-EP return record.
+    /**
+     * @param list<EntryPoint> $entryPoints
+     * @param array<string, list<ChangedSymbol>> $reachable
+     * @param array<string, string> $nextHop
+     * @return array<int, array{path: list<string>, triggers: list<ChangedSymbol>}>
+     */
+    private static function mapEntryPoints(array $entryPoints, array $reachable, array $nextHop): array
+    {
         $hits = [];
         foreach ($entryPoints as $idx => $ep) {
             $sym = $ep->handlerFqn;
             if ($sym === '' || strpos($sym, '::') === false) {
                 continue;
             }
-            if (!isset($reachableTriggers[$sym])) {
+            if (!isset($reachable[$sym])) {
                 continue;
             }
             $hits[$idx] = [
                 'path'     => self::buildPath($sym, $nextHop),
-                'triggers' => $reachableTriggers[$sym],
+                'triggers' => $reachable[$sym],
             ];
         }
-
         return $hits;
     }
 

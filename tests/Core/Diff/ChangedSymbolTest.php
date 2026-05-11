@@ -27,6 +27,35 @@ final class ChangedSymbolTest extends TestCase
         self::assertSame('file.php', $cs->symbol());
     }
 
+    public function testWithRelativeFileStripsProjectRoot(): void
+    {
+        $tmp = sys_get_temp_dir() . '/watson_cs_' . uniqid();
+        mkdir($tmp . '/app/Service', 0700, true);
+        file_put_contents($tmp . '/app/Service/Foo.php', '<?php class Foo {}');
+        try {
+            $cs = new ChangedSymbol($tmp . '/app/Service/Foo.php', 'App\\Service\\Foo', 'bar', 10, 20);
+            $rel = $cs->withRelativeFile($tmp);
+            self::assertSame('app/Service/Foo.php', $rel->filePath);
+            // Other fields unchanged.
+            self::assertSame('App\\Service\\Foo', $rel->classFqn);
+            self::assertSame('bar', $rel->methodName);
+            self::assertSame(10, $rel->startLine);
+            self::assertSame(20, $rel->endLine);
+        } finally {
+            @unlink($tmp . '/app/Service/Foo.php');
+            @rmdir($tmp . '/app/Service');
+            @rmdir($tmp . '/app');
+            @rmdir($tmp);
+        }
+    }
+
+    public function testWithRelativeFileLeavesOutsidePathsUntouched(): void
+    {
+        $cs = new ChangedSymbol('/abs/elsewhere/Foo.php', 'App\\Foo', null, 1, 1);
+        $rel = $cs->withRelativeFile('/different/root');
+        self::assertSame('/abs/elsewhere/Foo.php', $rel->filePath);
+    }
+
     public function testJsonSerializableEmitsSymbol(): void
     {
         $cs = new ChangedSymbol('/abs/Foo.php', 'App\\Foo', 'bar', 10, 20);

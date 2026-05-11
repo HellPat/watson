@@ -404,25 +404,15 @@ final class Renderer
      * be rare; happens for file-level changes when running in
      * `--name-only` mode).
      *
-     * @param list<array{symbol:string,class:?string,method:?string}> $triggers
+     * @param list<array{symbol?:string,class?:?string,method?:?string}> $triggers
      */
     private static function formatTriggers(array $triggers): string
     {
-        if ($triggers === []) {
+        $symbols = array_unique(array_filter(array_column($triggers, 'symbol')));
+        if ($symbols === []) {
             return '—';
         }
-        $parts = [];
-        $seen  = [];
-        foreach ($triggers as $t) {
-            $sym = (string) ($t['symbol'] ?? '');
-            if ($sym === '' || isset($seen[$sym])) {
-                continue;
-            }
-            $seen[$sym] = true;
-            $parts[] = '<code>' . $sym . '</code>';
-        }
-
-        return implode('<br>', $parts);
+        return implode('<br>', array_map(static fn (string $s): string => '<code>' . $s . '</code>', $symbols));
     }
 
     private static function kindIcon(string $kind): string
