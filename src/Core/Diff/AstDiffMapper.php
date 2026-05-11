@@ -15,6 +15,8 @@ use PhpParser\NodeVisitor\NameResolver;
 use PhpParser\Parser;
 use PhpParser\ParserFactory;
 use PhpParser\PrettyPrinter\Standard;
+use SebastianBergmann\Diff\Line;
+use SebastianBergmann\Diff\Parser as UnifiedDiffParser;
 
 /**
  * Map a unified diff (produced by `git diff -W -U99999`) to a list of
@@ -66,92 +68,56 @@ final class AstDiffMapper
     /**
      * Parse a unified diff into per-file old/new text reconstructions.
      *
+     * Delegates the unified-diff lexing to {@see UnifiedDiffParser}
+     * (sebastian/diff — battle-tested by PHPUnit + ParaTest). We only
+     * map the resulting Diff/Chunk/Line tree into the (path, oldText,
+     * newText) triple our AST diff cares about, picking the post-image
+     * filename for new/modified files and the pre-image for deletions.
+     *
      * @return list<array{path: string, oldText: string, newText: string}>
      */
     private static function parseDiff(string $diffText): array
     {
-        $lines  = preg_split('/\R/', $diffText) ?: [];
-        $files  = [];
-        $cur    = null;
-        $inHunk = false;
+        $files = [];
+        foreach ((new UnifiedDiffParser())->parse($diffText) as $diff) {
+            $added   = self::stripPathHeader($diff->from()) === '/dev/null';
+            $deleted = self::stripPathHeader($diff->to())   === '/dev/null';
+            $path    = self::stripPathHeader($deleted ? $diff->from() : $diff->to());
+            if ($path === '' || $path === '/dev/null') {
+                continue;
+            }
 
-        foreach ($lines as $line) {
-            // File header — `diff --git a/X b/Y` resets state.
-            if (str_starts_with($line, 'diff --git ')) {
-                if ($cur !== null) {
-                    $files[] = self::finishFile($cur);
+            $oldLines = [];
+            $newLines = [];
+            foreach ($diff->chunks() as $chunk) {
+                foreach ($chunk->lines() as $line) {
+                    if ($line->isUnchanged()) {
+                        $oldLines[] = $line->content();
+                        $newLines[] = $line->content();
+                    } elseif ($line->isRemoved()) {
+                        $oldLines[] = $line->content();
+                    } elseif ($line->isAdded()) {
+                        $newLines[] = $line->content();
+                    }
                 }
-                $cur = ['path' => '', 'oldLines' => [], 'newLines' => [], 'deleted' => false, 'added' => false];
-                $inHunk = false;
-                continue;
             }
 
-            if ($cur === null) {
-                continue;
-            }
-
-            if (str_starts_with($line, '--- ')) {
-                $rest = trim(substr($line, 4));
-                $cur['added'] = ($rest === '/dev/null');
-                continue;
-            }
-
-            if (str_starts_with($line, '+++ ')) {
-                $rest = self::stripPathHeader(substr($line, 4));
-                if ($rest === '/dev/null') {
-                    $cur['deleted'] = true;
-                } else {
-                    $cur['path'] = $rest;
-                }
-                continue;
-            }
-
-            if (str_starts_with($line, '@@')) {
-                $inHunk = true;
-                continue;
-            }
-
-            if (!$inHunk) {
-                continue;
-            }
-
-            if ($line === '' || $line === '\\ No newline at end of file') {
-                continue;
-            }
-
-            $marker = $line[0];
-            $body   = substr($line, 1);
-
-            if ($marker === ' ') {
-                $cur['oldLines'][] = $body;
-                $cur['newLines'][] = $body;
-            } elseif ($marker === '-') {
-                $cur['oldLines'][] = $body;
-            } elseif ($marker === '+') {
-                $cur['newLines'][] = $body;
-            }
-        }
-
-        if ($cur !== null) {
-            $files[] = self::finishFile($cur);
+            $files[] = [
+                'path'    => $path,
+                'oldText' => $added   ? '' : implode("\n", $oldLines),
+                'newText' => $deleted ? '' : implode("\n", $newLines),
+            ];
         }
 
         return $files;
     }
 
     /**
-     * @param array{path:string,oldLines:list<string>,newLines:list<string>,deleted:bool,added:bool} $cur
-     * @return array{path:string,oldText:string,newText:string}
+     * Drop the canonical `a/` / `b/` git-diff path prefix and any
+     * trailing `\t<timestamp>` some diff producers append (`unified=NN`
+     * isn't affected, but `diff -u --label` and a few SVN exporters
+     * are).
      */
-    private static function finishFile(array $cur): array
-    {
-        return [
-            'path'    => $cur['path'],
-            'oldText' => $cur['added']   ? '' : implode("\n", $cur['oldLines']),
-            'newText' => $cur['deleted'] ? '' : implode("\n", $cur['newLines']),
-        ];
-    }
-
     private static function stripPathHeader(string $rest): string
     {
         $rest = rtrim($rest);
