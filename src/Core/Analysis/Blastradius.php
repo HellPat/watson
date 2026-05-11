@@ -51,7 +51,7 @@ final class Blastradius
             true,
         );
 
-        /** @var array<int, list<string>> */
+        /** @var array<int, array{path: list<string>, triggers: list<ChangedSymbol>}> */
         $transitiveHits = [];
         if ($classLoader !== null) {
             $transitiveHits = TransitiveReach::affectedIndices(
@@ -70,6 +70,9 @@ final class Blastradius
             if (!$isDirect && !$isIndirect) {
                 continue;
             }
+            $triggers = $isDirect
+                ? self::triggersForDirect($ep, $symbolsByFile)
+                : ($transitiveHits[$idx]['triggers'] ?? []);
             $row = [
                 'kind' => $ep->kind,
                 'name' => $ep->name,
@@ -80,19 +83,12 @@ final class Blastradius
                 ],
                 'extra' => $ep->extra ?? null,
                 'min_confidence' => $isDirect ? 'NameOnly' : 'Indirect',
-                'triggered_by'   => self::triggersFor(
-                    $ep,
-                    $isDirect ? null : ($transitiveHits[$idx] ?? null),
-                    $symbolsByFile,
-                ),
+                'triggered_by'   => self::serializeTriggers($triggers, $projectRoot),
             ];
-            if (!$isDirect && isset($transitiveHits[$idx]) && count($transitiveHits[$idx]) > 1) {
-                // Drop the handler file itself (already in the row's `handler.path`)
-                // and emit the rest of the chain as the call-path.
-                $row['reach_path'] = array_slice(
-                    array_map(fn (string $abs): string => self::relativise($abs, $projectRoot), $transitiveHits[$idx]),
-                    1,
-                );
+            if (!$isDirect && isset($transitiveHits[$idx]['path']) && count($transitiveHits[$idx]['path']) > 1) {
+                // Drop the entry-point's own symbol (already in `handler.fqn`)
+                // and emit the chain of caller Class::method symbols.
+                $row['reach_path'] = array_slice($transitiveHits[$idx]['path'], 1);
             }
             $affected[] = $row;
         }
@@ -115,68 +111,48 @@ final class Blastradius
     }
 
     /**
-     * Pick the changed symbols that "explain" why this entry point was
-     * flagged.
+     * Direct-hit triggers: any ChangedSymbol whose file matches the
+     * handler's file. We don't filter by method here — a direct edit to
+     * the handler file is by definition a direct hit.
      *
-     * - direct hit → all symbols whose file is the handler's file.
-     * - indirect hit → all symbols whose file appears in the reach path
-     *   (file-level for now; symbol-graph precision lands in Phase B).
-     *
-     * @param list<string>|null            $reachPath absolute paths, handler first
-     * @param array<string, list<ChangedSymbol>> $symbolsByFile
-     * @return list<array{symbol:string,file:string,class:?string,method:?string}>
-     */
-    private static function triggersFor(
-        EntryPoint $ep,
-        ?array $reachPath,
-        array $symbolsByFile,
-    ): array {
-        $files = [];
-        if ($reachPath === null) {
-            $handlerReal = realpath($ep->handlerPath);
-            $files[] = $handlerReal !== false ? $handlerReal : $ep->handlerPath;
-        } else {
-            foreach ($reachPath as $abs) {
-                $files[] = $abs;
-            }
-        }
-
-        $out = [];
-        $seen = [];
-        foreach ($files as $f) {
-            foreach (self::symbolsForFile($f, $symbolsByFile) as $cs) {
-                $key = $cs->symbol() . '@' . $cs->filePath;
-                if (isset($seen[$key])) {
-                    continue;
-                }
-                $seen[$key] = true;
-                $out[] = [
-                    'symbol' => $cs->symbol(),
-                    'file'   => $cs->filePath,
-                    'class'  => $cs->classFqn,
-                    'method' => $cs->methodName,
-                ];
-            }
-        }
-
-        return $out;
-    }
-
-    /**
      * @param array<string, list<ChangedSymbol>> $symbolsByFile
      * @return list<ChangedSymbol>
      */
-    private static function symbolsForFile(string $absPath, array $symbolsByFile): array
+    private static function triggersForDirect(EntryPoint $ep, array $symbolsByFile): array
     {
-        if (isset($symbolsByFile[$absPath])) {
-            return $symbolsByFile[$absPath];
+        $handlerReal = realpath($ep->handlerPath);
+        $key = $handlerReal !== false ? $handlerReal : $ep->handlerPath;
+        if (isset($symbolsByFile[$key])) {
+            return $symbolsByFile[$key];
         }
-        $real = realpath($absPath);
-        if ($real !== false && isset($symbolsByFile[$real])) {
-            return $symbolsByFile[$real];
+        if ($handlerReal !== false && isset($symbolsByFile[$ep->handlerPath])) {
+            return $symbolsByFile[$ep->handlerPath];
         }
-
         return [];
+    }
+
+    /**
+     * @param list<ChangedSymbol> $triggers
+     * @return list<array{symbol:string,file:string,class:?string,method:?string}>
+     */
+    private static function serializeTriggers(array $triggers, string $projectRoot): array
+    {
+        $out = [];
+        $seen = [];
+        foreach ($triggers as $cs) {
+            $key = $cs->symbol() . '@' . $cs->filePath;
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $out[] = [
+                'symbol' => $cs->symbol(),
+                'file'   => self::relativise($cs->filePath, $projectRoot),
+                'class'  => $cs->classFqn,
+                'method' => $cs->methodName,
+            ];
+        }
+        return $out;
     }
 
     /**
