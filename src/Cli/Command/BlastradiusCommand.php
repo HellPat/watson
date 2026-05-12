@@ -34,6 +34,7 @@ final class BlastradiusCommand extends Command
             ->addOption('scope', null, InputOption::VALUE_REQUIRED, 'routes (runtime registry only) or all (adds commands / jobs / listeners / tests).', 'all')
             ->addOption('app-env', null, InputOption::VALUE_REQUIRED, 'APP_ENV passed to bin/console / artisan when collecting routes.', 'dev')
             ->addOption('max-depth', null, InputOption::VALUE_REQUIRED, 'Maximum hops the indirect-reach BFS walks from each entry-point handler. `0` (default) = unbounded — let the call graph saturate. Set N >= 1 to tighten the signal.', '0')
+            ->addOption('composer-dir', null, InputOption::VALUE_REQUIRED, 'Where the project\'s `composer.json` sits relative to the directory the diff was produced from. Use when the diff covers a wider repo than just the PHP project (e.g. monorepo where `composer.json` lives at `backend/`); watson strips that prefix from every path so it resolves against the project root. Default: `.` (no stripping; diff and project share a root).', '.')
             ->setHelp(<<<HELP
                 Reads a unified diff from stdin and reports which framework entry
                 points reach the changed methods. Comment-only and whitespace-only
@@ -56,7 +57,8 @@ final class BlastradiusCommand extends Command
         $startDir = (string) ($input->getOption('project') ?? (getcwd() ?: '.'));
         $project = ProjectDetector::detect($startDir);
 
-        $changes = self::readChangedSymbols($project->rootPath, $output);
+        $stripSegments = self::countSegments((string) $input->getOption('composer-dir'));
+        $changes = self::readChangedSymbols($project->rootPath, $output, $stripSegments);
         if ($changes === null) {
             return self::INVALID;
         }
@@ -102,14 +104,28 @@ final class BlastradiusCommand extends Command
      *         null = caller error (usage hint already printed),
      *         list = the parsed symbol set (possibly empty).
      */
-    private static function readChangedSymbols(string $projectRoot, OutputInterface $output): ?array
+    private static function readChangedSymbols(string $projectRoot, OutputInterface $output, int $stripSegments): ?array
     {
         $stdin = defined('STDIN') ? STDIN : fopen('php://stdin', 'r');
         if (!is_resource($stdin) || (function_exists('stream_isatty') && @stream_isatty($stdin))) {
             self::printUsage($output);
             return null;
         }
-        return ChangedFilesReader::readUnifiedDiffSymbols($stdin, $projectRoot);
+        return ChangedFilesReader::readUnifiedDiffSymbols($stdin, $projectRoot, $stripSegments);
+    }
+
+    /**
+     * Translate a `--composer-dir` relative path (e.g. `backend`,
+     * `services/api`, `.`) into the number of leading path segments
+     * to strip from each diff entry.
+     */
+    private static function countSegments(string $relPath): int
+    {
+        $trimmed = trim($relPath, "/ \t\n\r\0\x0B");
+        if ($trimmed === '' || $trimmed === '.') {
+            return 0;
+        }
+        return count(array_filter(explode('/', $trimmed), static fn (string $seg): bool => $seg !== ''));
     }
 
     /**

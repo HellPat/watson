@@ -46,14 +46,18 @@ use SebastianBergmann\Diff\Parser as UnifiedDiffParser;
  */
 final class AstDiffMapper
 {
-    public static function map(string $diffText, string $projectRoot): array
+    public static function map(string $diffText, string $projectRoot, int $stripSegments = 0): array
     {
         $files  = self::parseDiff($diffText);
         $parser = (new ParserFactory())->createForHostVersion();
         $out    = [];
 
         foreach ($files as $file) {
-            $absPath = self::absolutise($file['path'], $projectRoot);
+            $path = $stripSegments > 0 ? self::stripLeadingSegments($file['path'], $stripSegments) : $file['path'];
+            if ($path === '') {
+                continue;
+            }
+            $absPath = self::absolutise($path, $projectRoot);
             $oldMap  = self::buildSymbolMap($file['oldText'], $parser);
             $newMap  = self::buildSymbolMap($file['newText'], $parser);
 
@@ -63,6 +67,20 @@ final class AstDiffMapper
         }
 
         return $out;
+    }
+
+    /**
+     * Drop `$n` leading path segments. Matches `patch -pN` semantics:
+     * `backend/app/Foo.php` with N=1 becomes `app/Foo.php`. Returns the
+     * empty string when the path has too few segments.
+     */
+    private static function stripLeadingSegments(string $path, int $n): string
+    {
+        $segments = explode('/', $path);
+        if (count($segments) <= $n) {
+            return '';
+        }
+        return implode('/', array_slice($segments, $n));
     }
 
     /**

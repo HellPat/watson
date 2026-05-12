@@ -22,14 +22,19 @@ final class ChangedFilesReader
 {
     /**
      * @param resource $stream
+     * @param int      $stripSegments leading path segments to drop from each
+     *                                diff entry — matches `patch -pN`. `0`
+     *                                = no stripping; `1` drops one segment
+     *                                (e.g. `backend/app/Foo.php` →
+     *                                `app/Foo.php`).
      * @return list<ChangedSymbol>
      */
-    public static function readUnifiedDiffSymbols($stream, string $projectRoot): array
+    public static function readUnifiedDiffSymbols($stream, string $projectRoot, int $stripSegments = 0): array
     {
         $diff = stream_get_contents($stream);
         if (!is_string($diff) || $diff === '') {
             return [];
         }
-        return AstDiffMapper::map($diff, $projectRoot);
+        return AstDiffMapper::map($diff, $projectRoot, $stripSegments);
     }
 }
