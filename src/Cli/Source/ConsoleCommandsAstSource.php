@@ -47,6 +47,6 @@ final class ConsoleCommandsAstSource implements EntrypointSource
         if ($opts->wantsRoutesOnly()) {
             return [];
         }
-        return ConsoleCommandCollector::collect(ProjectComposer::psr4Roots($project), $reflector);
+        return ConsoleCommandCollector::collect(ProjectComposer::psr4Roots($project));
     }
 }

@@ -4,26 +4,31 @@ declare(strict_types=1);
 
 namespace Watson\Core\Discovery;
 
-use Watson\Cli\Reflection\StaticReflector;
+use PhpParser\Node;
+use PhpParser\Node\AttributeGroup;
+use PhpParser\Node\Stmt\Class_;
+use PhpParser\NodeTraverser;
+use PhpParser\NodeVisitor\NameResolver;
+use PhpParser\NodeVisitorAbstract;
+use PhpParser\ParserFactory;
 use Watson\Core\Entrypoint\EntryPoint;
 use Watson\Core\Entrypoint\Source;
 
 /**
- * AST-based Symfony Console command collector. Used by the
- * standalone-console-app resolver because such projects have no
- * `bin/console debug:container --tag=` to ask at runtime.
- *
- * Yields any concrete class that either
+ * AST-based Symfony Console command collector for standalone CLI
+ * tools (no `bin/console debug:container` to ask). Yields any
+ * concrete class that either
  *
  *   - extends `Symfony\Component\Console\Command\Command`, OR
  *   - carries the `#[AsCommand]` attribute.
  *
- * Pure AST via {@see StaticReflector} — never `require_once`s user code.
+ * Pure nikic/php-parser via {@see ClassIndex} for the discovery walk;
+ * a second AST pass per matched file pulls the `#[AsCommand]` argument
+ * (so we keep the public command name, not just the FQN).
  *
- * Directories to scan are *not* hard-coded. Callers (see
- * {@see \Watson\Cli\ConsoleAppEntrypointResolver}) derive them from the
- * project's own `composer.json` PSR-4 autoload roots so we follow the
- * project's declared layout rather than guess at conventions.
+ * Directories to scan are *not* hard-coded — callers derive them from
+ * the project's own `composer.json` PSR-4 autoload roots so we follow
+ * the project's declared layout rather than guess at conventions.
  */
 final class ConsoleCommandCollector
 {
@@ -34,82 +39,109 @@ final class ConsoleCommandCollector
      * @param list<string> $dirs absolute paths
      * @return list<EntryPoint>
      */
-    public static function collect(array $dirs, StaticReflector $reflector): array
+    public static function collect(array $dirs): array
     {
+        if ($dirs === []) {
+            return [];
+        }
+        $index = ClassIndex::buildFromDirs($dirs);
         $out = [];
-        foreach ($reflector->reflectAllInDirs($dirs) as $class) {
-            if ($class->isAbstract() || $class->isInterface() || $class->isTrait()) {
+        foreach ($index->all() as $entry) {
+            if ($entry->isAbstract || $entry->isInterface || $entry->isTrait) {
                 continue;
             }
-            if (!self::isCommand($class)) {
+            $hasAttr = in_array(self::AS_COMMAND_ATTR, $entry->attributeNames, true);
+            $isCommand = $hasAttr || $index->isSubclassOf($entry->fqn, self::COMMAND_BASE);
+            if (!$isCommand) {
                 continue;
             }
-
-            $name = self::commandName($class) ?? $class->getName();
-            $line = $class->getStartLine() ?: 0;
-            $handlerFqn = $class->getName();
-            try {
-                $execute = $class->getMethod('execute');
-                if ($execute !== null) {
-                    $line = $execute->getStartLine() ?: $line;
-                    $handlerFqn = $class->getName() . '::execute';
-                }
-            } catch (\Throwable) {
-                // class-level fallback
-            }
+            $commandName = $hasAttr ? self::readCommandName($entry->file, $entry->fqn) : null;
+            $execute = $entry->methods['execute'] ?? null;
+            $handlerFqn = $execute !== null ? $entry->fqn . '::execute' : $entry->fqn;
+            $line       = $execute !== null ? ($execute->startLine ?: $entry->startLine) : $entry->startLine;
 
             $out[] = new EntryPoint(
                 kind: 'symfony.command',
-                name: $name,
+                name: $commandName ?? $entry->fqn,
                 handlerFqn: $handlerFqn,
-                handlerPath: (string) $class->getFileName(),
+                handlerPath: $entry->file,
                 handlerLine: $line,
                 source: Source::Interface_,
             );
         }
-
         return $out;
     }
 
-    private static function isCommand(\Roave\BetterReflection\Reflection\ReflectionClass $class): bool
-    {
-        try {
-            if ($class->isSubclassOf(self::COMMAND_BASE) || $class->getName() === self::COMMAND_BASE) {
-                return true;
-            }
-        } catch (\Throwable) {
-            // fall through to attribute check
-        }
-        return self::commandName($class) !== null;
-    }
-
     /**
-     * Pull the `name` argument off a `#[AsCommand]` attribute. Symfony
-     * accepts both `#[AsCommand('foo')]` and `#[AsCommand(name: 'foo')]`,
-     * so we check the named form first and fall back to the first
-     * positional argument.
+     * Pull the `name` argument off a `#[AsCommand]` attribute on a
+     * specific class within `$file`. Symfony accepts both
+     * `#[AsCommand('foo')]` and `#[AsCommand(name: 'foo')]` — we
+     * check the named form first, then the first positional argument.
      */
-    private static function commandName(\Roave\BetterReflection\Reflection\ReflectionClass $class): ?string
+    private static function readCommandName(string $file, string $classFqn): ?string
     {
+        $code = @file_get_contents($file);
+        if (!is_string($code)) {
+            return null;
+        }
         try {
-            $attrs = $class->getAttributes();
+            $ast = (new ParserFactory())->createForHostVersion()->parse($code);
         } catch (\Throwable) {
             return null;
         }
-        foreach ($attrs as $attr) {
-            if ($attr->getName() !== self::AS_COMMAND_ATTR) {
+        if ($ast === null) {
+            return null;
+        }
+        $visitor = new AsCommandArgVisitor($classFqn);
+        $traverser = new NodeTraverser();
+        $traverser->addVisitor(new NameResolver());
+        $traverser->addVisitor($visitor);
+        $traverser->traverse($ast);
+        return $visitor->name;
+    }
+}
+
+/**
+ * @internal
+ */
+final class AsCommandArgVisitor extends NodeVisitorAbstract
+{
+    public ?string $name = null;
+
+    public function __construct(private readonly string $classFqn) {}
+
+    public function enterNode(Node $node): null
+    {
+        if (!($node instanceof Class_)) {
+            return null;
+        }
+        if ($node->namespacedName?->toString() !== $this->classFqn) {
+            return null;
+        }
+        foreach ($node->attrGroups as $group) {
+            $extracted = self::extractFromGroup($group);
+            if ($extracted !== null) {
+                $this->name = $extracted;
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private static function extractFromGroup(AttributeGroup $group): ?string
+    {
+        foreach ($group->attrs as $attr) {
+            if ($attr->name->toString() !== 'Symfony\\Component\\Console\\Attribute\\AsCommand') {
                 continue;
             }
-            try {
-                $args = $attr->getArguments();
-            } catch (\Throwable) {
-                continue;
-            }
-            if (isset($args['name']) && is_string($args['name']) && $args['name'] !== '') {
-                return $args['name'];
-            }
-            if (isset($args[0]) && is_string($args[0]) && $args[0] !== '') {
-                return $args[0];
+            foreach ($attr->args as $arg) {
+                if ($arg->name !== null && $arg->name->toString() !== 'name') {
+                    continue;
+                }
+                $value = $arg->value;
+                if ($value instanceof Node\Scalar\String_) {
+                    return $value->value !== '' ? $value->value : null;
+                }
             }
         }
         return null;

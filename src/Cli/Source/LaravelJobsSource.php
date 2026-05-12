@@ -31,6 +31,6 @@ final class LaravelJobsSource implements EntrypointSource
         if ($opts->wantsRoutesOnly()) {
             return [];
         }
-        return JobCollector::collect($project->rootPath . '/app/Jobs', $reflector);
+        return JobCollector::collect($project->rootPath . '/app/Jobs');
     }
 }

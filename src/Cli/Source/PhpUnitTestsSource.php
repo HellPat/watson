@@ -43,6 +43,6 @@ final class PhpUnitTestsSource implements EntrypointSource
         if ($opts->wantsRoutesOnly()) {
             return [];
         }
-        return PhpUnitCollector::collect(ProjectComposer::psr4DevRoots($project), $reflector);
+        return PhpUnitCollector::collect(ProjectComposer::psr4DevRoots($project));
     }
 }
