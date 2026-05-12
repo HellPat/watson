@@ -1,0 +1,18 @@
+{%- set entry_points = analysis.result.entry_points|default([]) -%}
+{%- set kinds = entry_points|map(entry => entry.kind|default('?'))|filter(k => k is not null) -%}
+{%- set unique_kinds = [] -%}
+{%- for kind in kinds -%}
+  {%- if kind not in unique_kinds -%}
+    {%- set unique_kinds = unique_kinds|merge([kind]) -%}
+  {%- endif -%}
+{%- endfor -%}
+{%- set kind_legend = [] -%}
+{%- for kind in unique_kinds|sort -%}
+  {%- set kind_legend = kind_legend|merge([short_kind(kind) ~ '=' ~ kind]) -%}
+{%- endfor -%}
+# entrypoints={{ entry_points|length }}
+# kinds: {{ kind_legend|join(' ') }}
+# fields: kind\tname\thandler\tpath:line\textra
+{% for entry in entry_points -%}
+{{ tok_row(short_kind(entry.kind|default('?')), entry.name|default('?'), entry.handler_fqn|default(''), entry.handler_path|default(''), entry.handler_line|default(0), entry.extra|default(null), context.root) }}
+{% endfor -%}

@@ -1,0 +1,10 @@
+{%- set summary = analysis.result.summary|default({}) -%}
+{%- set affected = analysis.result.affected_entry_points|default([]) -%}
+  summary: {{ summary.files_changed|default(0) }} files, {{ summary.entry_points_affected|default(0) }} entry points affected
+{% if affected is empty %}
+  no entry points reached by the changed files.
+{% else %}
+{% for entry in affected -%}
+    - {{ "%-24s"|format(entry.kind|default('?')) }} {{ "%-30s"|format(entry.name|default('?')) }} {{ entry.handler.fqn|default('?') }} ({{ entry.handler.path|default('') }}:{{ entry.handler.line|default(0) }})
+{% endfor -%}
+{% endif %}

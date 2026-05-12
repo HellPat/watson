@@ -42,17 +42,18 @@ final class RendererTest extends TestCase
         $out = Renderer::render(Renderer::FORMAT_MD, $envelope);
 
         // GFM table headers (pipe-delimited).
-        $this->assertStringContainsString('| reach | affected by changed | name | handler |', $out);
+        $this->assertStringContainsString('| reach | affected by changed | entry point |', $out);
         // GFM separator row.
-        $this->assertStringContainsString('|---|---|---|---|', $out);
+        $this->assertStringContainsString('|---|---|---|', $out);
         // Kind icons next to the kind label.
         $this->assertStringContainsString('🛣️', $out);
         $this->assertStringContainsString('⌨️', $out);
         // Reach badges (no backticks inside table cells).
         $this->assertStringContainsString('🎯 direct', $out);
         $this->assertStringContainsString('🔗 indirect', $out);
-        // Handler FQN + path:line on a single line inside the cell.
-        $this->assertStringContainsString('App\\HomeController::index (src/HomeController.php:8)', $out);
+        // Handler FQN + path:line live inside the combined entry-point cell.
+        $this->assertStringContainsString('<code>App\\HomeController::index</code>', $out);
+        $this->assertStringContainsString('src/HomeController.php:8', $out);
     }
 
     public function testTextRendersSummaryAndCounts(): void
@@ -92,7 +93,7 @@ final class RendererTest extends TestCase
 
     public function testMarkdownAffectedByChangedShowsTriggerSymbols(): void
     {
-        $envelope = new Envelope(language: 'php', framework: 'symfony', rootPath: '/x', base: 'main', head: 'HEAD');
+        $envelope = new Envelope(language: 'php', rootPath: '/x', base: 'main', head: 'HEAD');
         $envelope->pushAnalysis('blastradius', '0.4.0', [
             'summary' => ['files_changed' => 1, 'symbols_changed' => 1, 'entry_points_affected' => 1],
             'affected_entry_points' => [
@@ -110,7 +111,7 @@ final class RendererTest extends TestCase
         ]);
         $out = Renderer::render(Renderer::FORMAT_MD, $envelope);
 
-        $this->assertStringContainsString('| reach | affected by changed | name | handler |', $out);
+        $this->assertStringContainsString('| reach | affected by changed | entry point |', $out);
         $this->assertStringContainsString('App\\Service\\ProductService::userRankedPluNumbers', $out);
         $this->assertStringContainsString('🔗 indirect', $out);
     }
@@ -132,7 +133,7 @@ final class RendererTest extends TestCase
 
     private static function sampleListEnvelope(): Envelope
     {
-        $envelope = new Envelope(language: 'php', framework: 'symfony', rootPath: '/x');
+        $envelope = new Envelope(language: 'php', rootPath: '/x');
         $envelope->pushAnalysis('list-entrypoints', '0.2.0', [
             'entry_points' => [
                 ['kind' => 'symfony.route', 'name' => 'name', 'handler_fqn' => 'X::y', 'handler_path' => '/abs/X.php', 'handler_line' => 12, 'source' => 'runtime', 'extra' => ['path' => '/', 'methods' => ['GET']]],
@@ -152,15 +153,15 @@ final class RendererTest extends TestCase
     private static function withConfidence(Envelope $envelope, array $confidences): Envelope
     {
         $analyses = $envelope->jsonSerialize()['analyses'] ?? [];
-        $rebuilt = new Envelope(language: 'php', framework: 'symfony', rootPath: '/x', base: 'main', head: 'HEAD');
+        $rebuilt = new Envelope(language: 'php', rootPath: '/x', base: 'main', head: 'HEAD');
         foreach ($analyses as $a) {
             if (($a['name'] ?? '') === 'blastradius') {
-                $eps = $a['result']['affected_entry_points'] ?? [];
-                foreach ($eps as $i => &$ep) {
-                    $ep['min_confidence'] = $confidences[$i] ?? 'NameOnly';
+                $entryPoints = $a['result']['affected_entry_points'] ?? [];
+                foreach ($entryPoints as $i => &$entryPoint) {
+                    $entryPoint['min_confidence'] = $confidences[$i] ?? 'NameOnly';
                 }
-                unset($ep);
-                $a['result']['affected_entry_points'] = $eps;
+                unset($entryPoint);
+                $a['result']['affected_entry_points'] = $entryPoints;
             }
             $rebuilt->pushAnalysis($a['name'], $a['version'], $a['result'] ?? []);
         }
@@ -169,7 +170,7 @@ final class RendererTest extends TestCase
 
     private static function sampleBlastradiusEnvelope(): Envelope
     {
-        $envelope = new Envelope(language: 'php', framework: 'symfony', rootPath: '/x', base: 'main', head: 'HEAD');
+        $envelope = new Envelope(language: 'php', rootPath: '/x', base: 'main', head: 'HEAD');
         $envelope->pushAnalysis('blastradius', '0.2.0', [
             'summary' => ['files_changed' => 2, 'entry_points_affected' => 2],
             'affected_entry_points' => [

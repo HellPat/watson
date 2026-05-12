@@ -8,10 +8,10 @@
 
 ```bash
 composer require --dev hellpat/watson
-git diff -W -U99999 origin/main...HEAD | vendor/bin/watson blastradius --unified-diff --format=md
+git diff -W -U99999 origin/main...HEAD | vendor/bin/watson blastradius --format=md
 ```
 
-watson does not shell out to git. You pipe a diff in, watson tells you which framework entry points are reached — at **method** granularity, with comment-only and whitespace-only edits dropped at the AST layer. `-W` keeps each changed method whole inside the hunk; `-U99999` makes the hunk carry the full file so watson can AST-diff the two halves in memory. Works equally well with `git diff`, GitHub-Action diff payloads, or a hand-curated list.
+watson does not shell out to git. You pipe a unified diff in, watson tells you which framework entry points are reached — at **method** granularity, with comment-only and whitespace-only edits dropped at the AST layer. `-W` keeps each changed method whole inside the hunk; `-U99999` makes the hunk carry the full file so watson can AST-diff the two halves in memory.
 
 ---
 
@@ -114,14 +114,14 @@ Each block below is a description followed by the command. All examples assume `
 ```bash
 # 1. Auto-review focused only on what changed
 #    LLM is told the affected entry points; flags risky areas.
-git diff --name-only origin/main...HEAD | vendor/bin/watson blastradius --format=md | llm \
+git diff -W -U99999 origin/main...HEAD | vendor/bin/watson blastradius --format=md | llm \
   --system "Review this PR. Focus only on the affected entry points listed below.
 Flag anything risky around auth, money handling, or user-visible behaviour."
 
 
 # 2. Generate a manual testing guide
 #    Turns the blast radius into a concrete click-through checklist for QA.
-git diff --name-only origin/main...HEAD | vendor/bin/watson blastradius --format=md | llm \
+git diff -W -U99999 origin/main...HEAD | vendor/bin/watson blastradius --format=md | llm \
   --system "You are a senior dev. Given these affected entry points, write a
 concise manual testing guide: list the scenarios a reviewer must click through,
 the edge cases most likely to break, and any data shape that needs verifying."
@@ -129,26 +129,19 @@ the edge cases most likely to break, and any data shape that needs verifying."
 
 # 3. Coverage gap check — is the change covered by e2e / feature tests?
 #    `--scope=all` includes phpunit.test entries so the LLM can cross-reference.
-git diff --name-only origin/main...HEAD | vendor/bin/watson blastradius --scope=all --format=json | llm \
+git diff -W -U99999 origin/main...HEAD | vendor/bin/watson blastradius --scope=all --format=json | llm \
   --system "The JSON contains affected entry points (routes / commands / jobs /
 message handlers) AND every phpunit.test in the repo. Cross-reference: which affected
 entry points have at least one test that exercises them, and which don't?
 Output a markdown table; flag gaps as 'NEEDS COVERAGE'."
-
-
-# 4. Tight CI loop — routes only, one-line summary
-#    `--scope=routes` skips the messenger / jobs / tests scans.
-git diff --name-only origin/main...HEAD | vendor/bin/watson blastradius --scope=routes --format=md | llm \
-  --system "Summarise which user-facing routes change in this PR. One line each."
-
-
-# 5. Risk-rank the change
-#    Same input as (1), different rubric.
-git diff --name-only origin/main...HEAD | vendor/bin/watson blastradius --format=md | llm \
-  --system "Rate this PR's risk (low / med / high) and explain in 3 bullets.
-Consider: blast radius across kinds, whether async paths (jobs / message
-handlers) are involved, whether a test exists for every affected route."
 ```
+
+> For a plain list of affected routes / commands / risk surface, the
+> `--format=md` (or `text` / `tok`) output is the answer on its own — no
+> LLM needed. Pipe to an LLM only when you want something the raw output
+> can't give you: subjective judgement (risk, regression severity),
+> cross-referencing with an external source (tests, coverage,
+> observability), or written prose (testing guides).
 
 ### Post-release — observability MCP correlation
 
@@ -157,7 +150,7 @@ After a deploy, pipe the **just-shipped** entry points into an LLM that has an o
 ```bash
 # 1. Latency regression on routes that shipped in the last release
 #    Diffs two release tags so you only ask about routes that actually changed.
-git diff --name-only v1.4.0..v1.5.0 | vendor/bin/watson blastradius --scope=routes --format=md \
+git diff -W -U99999 v1.4.0..v1.5.0 | vendor/bin/watson blastradius --scope=routes --format=md \
   --base=v1.4.0 --head=v1.5.0 | llm \
   --system "These routes shipped in v1.5.0. Use Better Stack MCP:
 for each route, query p50 / p95 latency since the deploy timestamp
@@ -167,7 +160,7 @@ grew >20% or whose error rate doubled."
 
 # 2. Error / exception regression after deploy
 #    Wider scope so jobs and message handlers are also checked for new exceptions.
-git diff --name-only v1.4.0..v1.5.0 | vendor/bin/watson blastradius --format=md \
+git diff -W -U99999 v1.4.0..v1.5.0 | vendor/bin/watson blastradius --format=md \
   --base=v1.4.0 --head=v1.5.0 | llm \
   --system "These entry points (routes / commands / jobs / message handlers)
 shipped in v1.5.0. Use Better Stack MCP error tracking to:
@@ -204,37 +197,40 @@ No bundle, no service provider, no `config/bundles.php` entry. watson auto-detec
 
 ### `watson blastradius`
 
-Reads a diff from stdin (or `--files=`) and reports which entry points reach the changed *methods*. watson does not run git; the caller is responsible for picking the diff source.
+Reads a unified diff from stdin and reports which entry points reach the changed methods. watson does not run git; the caller picks the diff source. There is **one** input shape — looser modes (name-only, explicit file lists) were removed so the engine has a single contract to support.
 
-| # | input shape | precision | what it does | use when |
-| - | --- | --- | --- | --- |
-| 1 | `git diff -W -U99999 <a>...<b> \| watson blastradius --unified-diff` | **method-level** | `git diff -W` expands every hunk to the **whole function** it touches; `-U99999` pads context to ∞ so the hunk carries the **full file**. watson reconstructs old + new file content in-memory from the diff, AST-parses both halves, and hashes each `Class::method` body (docblocks + comments stripped, whitespace normalised). Only methods with a different hash become `ChangedSymbol`s — comment-only and whitespace-only edits **never reach the reach engine**. | recommended path for PR reviews — gives you the trigger `Class::method` column and the lowest false-positive rate |
-| 2 | `git diff --name-only <a>...<b> \| watson blastradius` | file-level | watson reads one absolute path per line and emits a file-level `ChangedSymbol` (`class=null`, `method=null`) per file. Every entry point whose handler file *or* whose call-graph closure includes that file is flagged. Comment-only edits **are** flagged here because no AST diff happens. | when the caller can't produce a unified diff (CI runners with name-only payloads, GitHub Actions `paths` lists, etc.) |
-| 3 | `watson blastradius --files=path/a --files=path/b` | file-level | Same engine as row 2 but the path list comes from a repeatable `--files=` flag (also accepts comma-separated values). Stdin is ignored. | no git involved — pre-computed list, hand-curated paths, or webhook payloads |
-| 4 | `git diff --cached -W -U99999 \| watson blastradius --unified-diff` | method-level | Same recipe as row 1 but `--cached` makes git emit the **staged** diff (index vs `HEAD`). watson behaviour identical. | pre-commit / pre-push review of staged changes only |
-| 5 | `git diff -W -U99999 origin/main...HEAD \| watson blastradius --unified-diff --scope=routes --max-depth=1` | method-level | `--scope=routes` skips the message-handler / job / phpunit scans (cheapest possible run). `--max-depth=1` caps the indirect-reach BFS at one hop from each entry-point handler file → sharper signal, higher recall risk. | tight CI loops where you only want to know which **user-facing routes** changed |
+```bash
+git diff -W -U99999 origin/main...HEAD | watson blastradius
+```
 
-When run in an interactive shell with no input piped and no `--files`, watson exits with a usage hint instead of silently producing zero results.
+`-W` expands every hunk to the whole function it touches; `-U99999` pads context to ∞ so the hunk carries the full file. watson reconstructs old + new file content in-memory from the diff, AST-parses both halves, and hashes each `Class::method` body (docblocks + comments stripped, whitespace normalised). Only methods with a different hash become `ChangedSymbol`s — comment-only and whitespace-only edits never reach the reach engine.
+
+Variants of the same pipe:
+
+- **Staged-only:** `git diff --cached -W -U99999 | watson blastradius`
+- **Two-tag delta:** `git diff -W -U99999 v1.4.0..v1.5.0 | watson blastradius`
+
+When run with no pipe (interactive shell), watson exits with a usage hint instead of silently producing zero results.
 
 Each affected entry point comes back with an **`affected by changed`** column listing the trigger `Class::method` symbols. Reach kind is one of:
 
 - `🎯 direct` — the entry point's own handler file holds a changed symbol.
 - `🔗 indirect` — the handler reaches a changed file through its imports, `new`, static calls, or type hints. Depth is bounded by `--max-depth=N` (default `3`).
 
-#### Other flags
+#### Flags
 
 | flag | default | what it does |
 | --- | --- | --- |
-| `--format=text\|md\|json\|tok` | `text` | output shape. `md` is tuned for PR descriptions / LLM prompts; `json` is the machine contract; `tok` is tab-separated for token-cheap LLM piping |
-| `--scope=routes\|all` | `all` | `routes` skips commands / jobs / message handlers / tests. Faster startup, smaller signal |
-| `--max-depth=N` | `3` | BFS hops the indirect-reach pass walks from each entry-point handler file before stopping. Lower = tighter signal, higher = more recall |
-| `--app-env=ENV` | `dev` | value passed to `bin/console` / `artisan` when collecting routes |
-| `--project=PATH` | walks up from `cwd` | force the project root rather than autodetecting |
-| `--base=REF` / `--head=REF` | none | cosmetic labels shown in the rendered envelope so consumers can correlate output to a diff range |
+| `--format=text\|md\|json\|tok` | `text` | Output shape. `md` is tuned for PR descriptions / LLM prompts; `json` is the machine contract; `tok` is tab-separated for token-cheap LLM piping. |
+| `--scope=routes\|all` | `all` | `routes` skips commands / jobs / message handlers / tests. Faster startup, smaller signal. |
+| `--max-depth=N` | `3` | Hops the indirect-reach BFS walks from each entry-point handler before stopping. Lower = tighter signal, higher = more recall. |
+| `--app-env=ENV` | `dev` | Value passed to `bin/console` / `artisan` when collecting routes. |
+| `--project=PATH` | walks up from `cwd` | Force the project root rather than autodetecting. |
+| `--base=REF` / `--head=REF` | none | Cosmetic labels shown in the rendered envelope so consumers can correlate output to a diff range. |
 
 ### `watson list-entrypoints`
 
-Snapshot every entry point the framework has registered: routes, commands, message handlers, jobs (Laravel), tests. Same options as `blastradius`, minus the diff-input flags.
+Snapshot every entry point the framework has registered: routes, commands, message handlers, jobs (Laravel), tests. Same flags as `blastradius`, minus the diff-input one.
 
 ### `watson <cmd> --help`
 
@@ -242,25 +238,20 @@ Snapshot every entry point the framework has registered: routes, commands, messa
 $ watson blastradius --help
 
 Description:
-  Report which routes, commands, jobs, and message handlers are reached by
-  a list of changed files (read from stdin, or --files=).
+  Report which routes, commands, jobs, and listeners are reached by the
+  unified diff piped on stdin.
 
 Usage:
   blastradius [options]
 
 Options:
-      --files=FILES      Explicit file path (repeatable, or comma-separated).
-                         Bypasses stdin. (multiple values allowed)
-      --unified-diff     Parse stdin as a unified diff (e.g. `git diff …`) instead
-                         of a newline-separated path list.
-      --base=BASE        Cosmetic label shown as the diff base in rendered output
-      --head=HEAD        Cosmetic label shown as the diff head in rendered output
-      --project=PROJECT  Project root (defaults to walking up from CWD)
-      --format=FORMAT    text (human terminal) | md (PRs/LLMs) | json (machine)
-                         | tok (token-optimized for LLM pipes) [default: "text"]
-      --scope=SCOPE      routes (cheapest) | all (+ commands / jobs / message
-                         handlers / tests) [default: "all"]
-      --app-env=APP-ENV  APP_ENV passed to bin/console / artisan [default: "dev"]
+      --base=BASE          Cosmetic label shown as the diff base in rendered output.
+      --head=HEAD          Cosmetic label shown as the diff head in rendered output.
+      --project=PROJECT    Project root (defaults to walking up from CWD).
+      --format=FORMAT      text | md | json | tok [default: "text"]
+      --scope=SCOPE        routes | all [default: "all"]
+      --app-env=APP-ENV    APP_ENV passed to bin/console / artisan [default: "dev"]
+      --max-depth=MAX-DEPTH  BFS hops the indirect-reach pass walks [default: 3]
 ```
 
 ```

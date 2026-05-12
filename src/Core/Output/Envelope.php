@@ -6,9 +6,15 @@ namespace Watson\Core\Output;
 
 /**
  * Multi-analysis envelope. Top-level fields (`tool`, `version`, `language`,
- * `framework`, `context`) are emitted once per invocation; each analysis
+ * `context`, `sources`) are emitted once per invocation; each analysis
  * (`blastradius`, `list-entrypoints`, …) appends its own `result` block to
- * `analyses[]`. Backwards-compatible with the Rust schema.
+ * `analyses[]`.
+ *
+ * `sources` is the chain-of-discovery report produced by
+ * {@see \Watson\Cli\ChainedEntrypointResolver}: one entry per
+ * `EntrypointSource` showing whether it ran, skipped, or failed. The
+ * old `framework` label was dropped in favour of this per-source
+ * attribution.
  */
 final class Envelope implements \JsonSerializable
 {
@@ -18,13 +24,27 @@ final class Envelope implements \JsonSerializable
     /** @var list<array<string,mixed>> */
     private array $analyses = [];
 
+    /** @var list<SourceStatus> */
+    private array $sources = [];
+
     public function __construct(
         public readonly string $language,
-        public readonly string $framework,
         public readonly string $rootPath,
         public readonly ?string $base = null,
         public readonly ?string $head = null,
     ) {
+    }
+
+    /** @param list<SourceStatus> $sources */
+    public function setSources(array $sources): void
+    {
+        $this->sources = $sources;
+    }
+
+    /** @return list<SourceStatus> */
+    public function sources(): array
+    {
+        return $this->sources;
     }
 
     /** @param array<string,mixed> $result */
@@ -62,8 +82,8 @@ final class Envelope implements \JsonSerializable
             'tool' => self::TOOL,
             'version' => self::TOOL_VERSION,
             'language' => $this->language,
-            'framework' => $this->framework,
             'context' => $context,
+            'sources' => array_map(static fn (SourceStatus $s) => $s->jsonSerialize(), $this->sources),
             'analyses' => $this->analyses,
         ];
     }

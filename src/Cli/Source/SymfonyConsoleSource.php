@@ -31,7 +31,7 @@ final class SymfonyConsoleSource
     public function routes(): array
     {
         $proc = new Process(
-            ['php', '-d', 'display_errors=stderr', $this->project->consoleScript, 'debug:router', '--format=json', '--env=' . $this->appEnv],
+            ['php', '-d', 'display_errors=stderr', $this->project->rootPath . "/bin/console", 'debug:router', '--format=json', '--env=' . $this->appEnv],
             $this->project->rootPath,
         );
         $proc->mustRun();
@@ -78,7 +78,7 @@ final class SymfonyConsoleSource
     public function commands(): array
     {
         $proc = new Process(
-            ['php', '-d', 'display_errors=stderr', $this->project->consoleScript, 'debug:container', '--tag=console.command', '--format=json', '--env=' . $this->appEnv],
+            ['php', '-d', 'display_errors=stderr', $this->project->rootPath . "/bin/console", 'debug:container', '--tag=console.command', '--format=json', '--env=' . $this->appEnv],
             $this->project->rootPath,
         );
         $proc->mustRun();
@@ -188,7 +188,7 @@ final class SymfonyConsoleSource
     public function messageHandlers(): array
     {
         $proc = new Process(
-            ['php', '-d', 'display_errors=stderr', $this->project->consoleScript, 'debug:container', '--tag=messenger.message_handler', '--format=json', '--env=' . $this->appEnv],
+            ['php', '-d', 'display_errors=stderr', $this->project->rootPath . "/bin/console", 'debug:container', '--tag=messenger.message_handler', '--format=json', '--env=' . $this->appEnv],
             $this->project->rootPath,
         );
         $proc->run();

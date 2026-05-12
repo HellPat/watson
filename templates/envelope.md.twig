@@ -1,0 +1,20 @@
+{# Lean top-level wrapper. No `# watson — php` banner, no abs root,
+   no tool-version footer — none of that is useful in a PR comment. #}
+{% if context.base is defined and context.head is defined -%}
+_Diff `{{ short_rev(context.base) }}` → `{{ short_rev(context.head) }}`_
+
+{% endif -%}
+{% if sources is not empty -%}
+{% include '_sources.md.twig' %}
+{% endif -%}
+{% for analysis in analyses -%}
+## {{ analysis.name }}
+
+{% if not analysis.ok %}
+**Error**: {{ analysis.error.message|default('(unknown)') }}
+
+{% else %}
+{% include analysis.name ~ '.md.twig' %}
+
+{% endif -%}
+{% endfor -%}

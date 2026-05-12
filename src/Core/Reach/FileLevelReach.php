@@ -27,8 +27,8 @@ final class FileLevelReach
     public static function affectedIndices(array $entryPoints, array $changes): array
     {
         $changedSet = [];
-        foreach ($changes as $cs) {
-            $f = $cs->filePath;
+        foreach ($changes as $changedSymbol) {
+            $f = $changedSymbol->filePath;
             if ($f === '') {
                 continue;
             }
@@ -41,9 +41,9 @@ final class FileLevelReach
         }
 
         $hits = [];
-        foreach ($entryPoints as $idx => $ep) {
-            $real = realpath($ep->handlerPath);
-            $key = $real !== false ? $real : $ep->handlerPath;
+        foreach ($entryPoints as $idx => $entryPoint) {
+            $real = realpath($entryPoint->handlerPath);
+            $key = $real !== false ? $real : $entryPoint->handlerPath;
             if (isset($changedSet[$key])) {
                 $hits[] = $idx;
             }

@@ -1,0 +1,5 @@
+{%- set entry_points = analysis.result.entry_points|default([]) -%}
+  {{ entry_points|length }} entry point(s):
+{% for entry in entry_points -%}
+    - {{ "%-24s"|format(entry.kind|default('?')) }} {{ "%-30s"|format(entry.name|default('?')) }} {{ entry.handler_fqn|default('?') }}
+{% endfor -%}

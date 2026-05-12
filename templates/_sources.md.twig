@@ -1,0 +1,12 @@
+{# Per-run source discovery report. Collapsed by default. #}
+{% set ran_count = sources|filter(source => source.status == 'ran')|length %}
+<details>
+<summary>🔍 sources — {{ ran_count }}/{{ sources|length }} ran</summary>
+
+| status | source | count | error |
+|---|---|---|---|
+{% for source in sources -%}
+| {{ status_badge(source.status) }} | `{{ source.name }}` | {{ source.count }} | {{ source.error is defined ? '`' ~ source.error ~ '`' : '' }} |
+{% endfor %}
+</details>
+

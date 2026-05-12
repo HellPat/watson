@@ -25,7 +25,32 @@ final class EntryPoint implements \JsonSerializable
         public readonly Source $source,
         /** Kind-specific metadata: HTTP method/path, cron expression, frequency. Null when none. */
         public readonly ?array $extra = null,
+        /**
+         * Name of the {@see \Watson\Cli\Source\EntrypointSource} that
+         * emitted this row, e.g. `laravel.routes`. Null only for fixtures
+         * / legacy callers that didn't go through the chain.
+         */
+        public readonly ?string $discoveredBy = null,
     ) {
+    }
+
+    /**
+     * Return a clone tagged with the source name. Used by
+     * {@see \Watson\Cli\ChainedEntrypointResolver} to stamp every row
+     * with the source that produced it.
+     */
+    public function withDiscoveredBy(string $sourceName): self
+    {
+        return new self(
+            kind: $this->kind,
+            name: $this->name,
+            handlerFqn: $this->handlerFqn,
+            handlerPath: $this->handlerPath,
+            handlerLine: $this->handlerLine,
+            source: $this->source,
+            extra: $this->extra,
+            discoveredBy: $sourceName,
+        );
     }
 
     public function jsonSerialize(): array
@@ -40,6 +65,9 @@ final class EntryPoint implements \JsonSerializable
         ];
         if ($this->extra !== null && $this->extra !== []) {
             $out['extra'] = $this->extra;
+        }
+        if ($this->discoveredBy !== null) {
+            $out['discovered_by'] = $this->discoveredBy;
         }
 
         return $out;

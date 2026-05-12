@@ -30,6 +30,29 @@ final class ChangedSymbol implements \JsonSerializable
     }
 
     /**
+     * Return a clone whose `filePath` is relative to `$projectRoot`
+     * (when the path is inside the project), unchanged otherwise.
+     * Used by serializers to avoid leaking absolute paths into JSON /
+     * markdown output.
+     */
+    public function withRelativeFile(string $projectRoot): self
+    {
+        $rootReal = realpath($projectRoot) ?: $projectRoot;
+        $real = realpath($this->filePath);
+        $candidate = $real !== false ? $real : $this->filePath;
+        if (!str_starts_with($candidate, $rootReal . DIRECTORY_SEPARATOR)) {
+            return $this;
+        }
+        return new self(
+            substr($candidate, strlen($rootReal) + 1),
+            $this->classFqn,
+            $this->methodName,
+            $this->startLine,
+            $this->endLine,
+        );
+    }
+
+    /**
      * Human-readable identity used in renderer cells and JSON. Never empty.
      *
      *   ChangedSymbol('…/Foo.php', 'App\Foo', 'bar', …) → "App\Foo::bar"

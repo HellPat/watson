@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace Watson\Cli;
 
+/**
+ * Locate the project root by walking up from `$startDir` until a
+ * `composer.json` is found. Framework picking has moved into each
+ * {@see \Watson\Cli\Source\EntrypointSource}, so this is now a pure
+ * "find the root" walk that never throws on missing framework markers.
+ */
 final class ProjectDetector
 {
-    /**
-     * Walk up from `$startDir` until we find a Symfony `bin/console` or
-     * Laravel `artisan`.
-     */
     public static function detect(string $startDir): Project
     {
         $real = realpath($startDir);
@@ -19,22 +21,9 @@ final class ProjectDetector
 
         $current = $real;
         while (true) {
-            $hasSymfony = is_file($current . '/bin/console');
-            $hasLaravel = is_file($current . '/artisan');
-
-            if ($hasSymfony && $hasLaravel) {
-                throw new \RuntimeException(sprintf(
-                    'both bin/console and artisan present in %s — ambiguous project layout',
-                    $current,
-                ));
+            if (is_file($current . '/composer.json')) {
+                return new Project($current);
             }
-            if ($hasSymfony) {
-                return new Project($current, Framework::Symfony, 'bin/console');
-            }
-            if ($hasLaravel) {
-                return new Project($current, Framework::Laravel, 'artisan');
-            }
-
             $parent = dirname($current);
             if ($parent === $current) {
                 break;
@@ -43,7 +32,7 @@ final class ProjectDetector
         }
 
         throw new \RuntimeException(sprintf(
-            'no Symfony bin/console or Laravel artisan found at or above %s; pass --project=<path>',
+            'no composer.json found at or above %s; pass --project=<path>',
             $real,
         ));
     }

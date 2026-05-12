@@ -22,13 +22,13 @@ final class FileLevelReachTest extends TestCase
         file_put_contents($b, '<?php');
 
         try {
-            $eps = [
+            $entryPoints = [
                 self::ep($a),
                 self::ep($b),
                 self::ep($tmp . '/Untouched.php'),
             ];
 
-            $hits = FileLevelReach::affectedIndices($eps, [self::cs($a)]);
+            $hits = FileLevelReach::affectedIndices($entryPoints, [self::cs($a)]);
 
             $this->assertSame([0], $hits);
         } finally {
@@ -40,18 +40,18 @@ final class FileLevelReachTest extends TestCase
 
     public function testEmptyDiffYieldsNoHits(): void
     {
-        $eps = [self::ep('/nonexistent/X.php')];
-        $this->assertSame([], FileLevelReach::affectedIndices($eps, []));
+        $entryPoints = [self::ep('/nonexistent/X.php')];
+        $this->assertSame([], FileLevelReach::affectedIndices($entryPoints, []));
     }
 
     public function testNonExistentDeletedFilePathStillMatches(): void
     {
         $deleted = '/abs/path/Deleted.php';
-        $eps = [self::ep($deleted)];
+        $entryPoints = [self::ep($deleted)];
 
         // Deleted files in the diff have no realpath; reach must still
         // match them by raw string so blastradius reports them.
-        $this->assertSame([0], FileLevelReach::affectedIndices($eps, [self::cs($deleted)]));
+        $this->assertSame([0], FileLevelReach::affectedIndices($entryPoints, [self::cs($deleted)]));
     }
 
     private static function cs(string $path): ChangedSymbol
