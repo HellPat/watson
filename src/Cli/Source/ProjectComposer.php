@@ -58,12 +58,37 @@ final class ProjectComposer
      */
     public static function psr4Roots(Project $project): array
     {
+        return self::psr4RootsForSections($project, ['autoload', 'autoload-dev']);
+    }
+
+    /**
+     * Absolute paths declared under `autoload-dev.psr-4` only.
+     *
+     * Used by test-discovery sources: tests live in dev autoload by
+     * convention, and walking the production `autoload.psr-4` roots
+     * (Laravel's `app/` etc.) just to find `TestCase` subclasses is a
+     * performance trap — Better Reflection has to parse every class
+     * and chase its inheritance chain.
+     *
+     * @return list<string>
+     */
+    public static function psr4DevRoots(Project $project): array
+    {
+        return self::psr4RootsForSections($project, ['autoload-dev']);
+    }
+
+    /**
+     * @param list<string> $sections
+     * @return list<string>
+     */
+    private static function psr4RootsForSections(Project $project, array $sections): array
+    {
         $composer = self::composerJson($project);
         if ($composer === null) {
             return [];
         }
         $dirs = [];
-        foreach (['autoload', 'autoload-dev'] as $section) {
+        foreach ($sections as $section) {
             $psr4 = $composer[$section]['psr-4'] ?? null;
             if (!is_array($psr4)) {
                 continue;
