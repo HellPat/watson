@@ -317,10 +317,12 @@ final class Renderer
                         ),
                     ];
                 }
-                $lines[] = sprintf('#### %s `%s` — %d', self::kindIcon($kind), $kind, count($entries));
-                $lines[] = '';
-                self::appendGfmTable($lines, ['entry point'], $rows);
-                $lines[] = '';
+                self::appendCollapsibleGroup(
+                    $lines,
+                    sprintf('%s `%s` — %d', self::kindIcon($kind), $kind, count($entries)),
+                    ['entry point'],
+                    $rows,
+                );
             }
 
             return;
@@ -336,6 +338,18 @@ final class Renderer
             $lines[] = self::reachLegend();
             $lines[] = '';
             foreach (self::groupByKind($affected) as $kind => $entries) {
+                // Stable sort: direct (NameOnly) above indirect, then by
+                // entry-point name for predictable diff-comment output.
+                usort($entries, static function (array $left, array $right): int {
+                    $rank = static fn (array $entryPoint): int => match ($entryPoint['min_confidence'] ?? null) {
+                        'NameOnly' => 0,
+                        'Indirect' => 1,
+                        default    => 2,
+                    };
+                    $cmp = $rank($left) <=> $rank($right);
+                    return $cmp !== 0 ? $cmp : strcmp((string) ($left['name'] ?? ''), (string) ($right['name'] ?? ''));
+                });
+
                 $rows = [];
                 foreach ($entries as $entryPoint) {
                     /** @var list<string>|null $reachPath */
@@ -354,12 +368,35 @@ final class Renderer
                         ),
                     ];
                 }
-                $lines[] = sprintf('#### %s `%s` — %d', self::kindIcon($kind), $kind, count($entries));
-                $lines[] = '';
-                self::appendGfmTable($lines, ['reach', 'affected by changed', 'entry point'], $rows);
-                $lines[] = '';
+                self::appendCollapsibleGroup(
+                    $lines,
+                    sprintf('%s `%s` — %d', self::kindIcon($kind), $kind, count($entries)),
+                    ['reach', 'affected by changed', 'entry point'],
+                    $rows,
+                );
             }
         }
+    }
+
+    /**
+     * Wrap one kind's table in a `<details>` block so each group renders
+     * collapsed by default. Long affected-entry-point lists (hundreds
+     * of phpunit tests, etc.) stop swamping the PR comment, but a
+     * reviewer can click any group open to inspect.
+     *
+     * @param-out list<string>    $lines
+     * @param list<string>        $headers
+     * @param list<list<string>>  $rows
+     */
+    private static function appendCollapsibleGroup(array &$lines, string $summary, array $headers, array $rows): void
+    {
+        $lines[] = '<details>';
+        $lines[] = sprintf('<summary>%s</summary>', $summary);
+        $lines[] = '';
+        self::appendGfmTable($lines, $headers, $rows);
+        $lines[] = '';
+        $lines[] = '</details>';
+        $lines[] = '';
     }
 
     /**
