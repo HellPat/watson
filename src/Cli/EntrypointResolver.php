@@ -35,9 +35,11 @@ final class EntrypointResolver
         $classLoader = self::loadConsumerClassLoader($project->rootPath);
         $reflector   = new StaticReflector($project->rootPath, $classLoader);
 
-        return $project->framework === Framework::Symfony
-            ? SymfonyEntrypointResolver::collect($project, $reflector, $scope, $appEnv)
-            : LaravelEntrypointResolver::collect($project, $reflector, $scope, $appEnv);
+        return match ($project->framework) {
+            Framework::Symfony    => SymfonyEntrypointResolver::collect($project, $reflector, $scope, $appEnv),
+            Framework::Laravel    => LaravelEntrypointResolver::collect($project, $reflector, $scope, $appEnv),
+            Framework::ConsoleApp => ConsoleAppEntrypointResolver::collect($project, $reflector, $scope, $appEnv),
+        };
     }
 
     private static function loadConsumerClassLoader(string $projectRoot): ?ClassLoader
