@@ -159,17 +159,24 @@ final class WatsonContext implements Context
         }
     }
 
-    #[Then('the framework should be reported as :expected')]
-    public function frameworkShouldBe(string $expected): void
+    #[Then('the source report contains :name with status :status')]
+    public function sourceReportContains(string $name, string $status): void
     {
         $envelope = $this->parseEnvelope();
-        if (($envelope['framework'] ?? null) !== $expected) {
-            throw new \RuntimeException(sprintf(
-                'expected framework=%s, got "%s"',
-                $expected,
-                $envelope['framework'] ?? '(missing)',
-            ));
+        foreach ($envelope['sources'] ?? [] as $source) {
+            if (($source['name'] ?? null) === $name) {
+                if (($source['status'] ?? null) !== $status) {
+                    throw new \RuntimeException(sprintf(
+                        'source %s: expected status %s, got "%s"',
+                        $name,
+                        $status,
+                        $source['status'] ?? '(missing)',
+                    ));
+                }
+                return;
+            }
         }
+        throw new \RuntimeException(sprintf('source %s not present in report', $name));
     }
 
     #[Given('the working tree starts clean from :relative')]
@@ -200,9 +207,23 @@ final class WatsonContext implements Context
             $this->touchedFiles[$relative] = (string) file_get_contents($abs);
         }
         $original = $this->touchedFiles[$relative];
-        // Append a no-op trailing comment that still creates a real diff hunk
-        // touching the file so changedFiles() picks it up.
-        $modified = rtrim($original) . "\n// watson-test-edit " . uniqid('', true) . "\n";
+        // Insert a real (non-comment) statement inside an existing method so
+        // AstDiffMapper produces a `ChangedSymbol` for that method.
+        // Comment-only edits are filtered out at the AST layer and would
+        // (correctly) produce zero affected entry points.
+        $marker = '// WATSON_BEHAT_INJECT';
+        $injection = '        $watsonProbe = "' . uniqid('', true) . '"; ' . $marker;
+        if (str_contains($original, $marker)) {
+            $modified = preg_replace('/' . preg_quote($marker, '/') . '/', $marker . ' // ' . uniqid('', true), $original, 1);
+        } else {
+            // Drop a one-liner into the first method body the file declares.
+            // Falls back to appending a property declaration when no `{` body
+            // is found.
+            $modified = preg_replace('/(\bfunction\s+\w+\s*\([^)]*\)\s*(?::\s*[\\\\\w|]+\s*)?\{)/', "$1\n" . $injection, $original, 1);
+            if ($modified === null || $modified === $original) {
+                $modified = rtrim($original) . "\n    // " . $marker . " " . uniqid('', true) . "\n";
+            }
+        }
         if (file_put_contents($abs, $modified) === false) {
             throw new \RuntimeException("failed to write fixture: {$abs}");
         }
@@ -211,12 +232,15 @@ final class WatsonContext implements Context
     #[When('/^I run "watson ([^"]+)" against the working-tree diff$/')]
     public function runWatsonBlastradius(string $command): void
     {
-        // watson no longer shells git itself — capture the diff name-only
-        // list externally, pipe it into watson via stdin.
-        // `--relative` makes git emit paths relative to the fixture dir
-        // (not the watson repo's git toplevel), matching the project root
-        // watson resolves against.
-        $diff = new Process(['git', 'diff', '--name-only', '--relative', $this->baseSha], $this->fixturePath);
+        // watson no longer shells git itself — capture a function-scoped
+        // unified diff (`-W -U99999`) so the AST-diff layer sees the
+        // whole touched function and can reconstruct old + new without
+        // a baseline tree. `--relative` keeps paths anchored to the
+        // fixture root.
+        $diff = new Process(
+            ['git', 'diff', '-W', '-U99999', '--relative', $this->baseSha],
+            $this->fixturePath,
+        );
         $diff->mustRun();
         $changedFiles = $diff->getOutput();
 

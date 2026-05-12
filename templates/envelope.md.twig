@@ -1,19 +1,14 @@
-{# Top-level markdown wrapper. Iterates analyses + includes per-analysis partials. #}
-# watson — {{ language }}
+{# Lean top-level wrapper. No `# watson — php` banner, no abs root,
+   no tool-version footer — none of that is useful in a PR comment. #}
+{% if context.base is defined and context.head is defined -%}
+_Diff `{{ short_rev(context.base) }}` → `{{ short_rev(context.head) }}`_
 
-_tool {{ tool }} v{{ version }}_
-
-{% if context.base is defined and context.head is defined %}
-Diff: `{{ short_rev(context.base) }}` → `{{ short_rev(context.head) }}`
-{% endif %}
-Root: `{{ context.root }}`
-
-{% if sources is not empty %}
+{% endif -%}
+{% if sources is not empty -%}
 {% include '_sources.md.twig' %}
-{% endif %}
-{% for analysis in analyses %}
+{% endif -%}
+{% for analysis in analyses -%}
 ## {{ analysis.name }}
-_v{{ analysis.version }}_
 
 {% if not analysis.ok %}
 **Error**: {{ analysis.error.message|default('(unknown)') }}
@@ -21,5 +16,5 @@ _v{{ analysis.version }}_
 {% else %}
 {% include analysis.name ~ '.md.twig' %}
 
-{% endif %}
-{% endfor %}
+{% endif -%}
+{% endfor -%}
