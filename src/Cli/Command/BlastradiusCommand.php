@@ -27,8 +27,6 @@ final class BlastradiusCommand extends Command
     protected function configure(): void
     {
         $this
-            ->addOption('base', null, InputOption::VALUE_REQUIRED, 'Cosmetic label shown as the diff base in the rendered output (e.g. "main").')
-            ->addOption('head', null, InputOption::VALUE_REQUIRED, 'Cosmetic label shown as the diff head in the rendered output (e.g. "HEAD").')
             ->addOption('project', null, InputOption::VALUE_REQUIRED, 'Project root (defaults to walking up from CWD).')
             ->addOption('format', null, InputOption::VALUE_REQUIRED, 'Output format: text (human terminal), md (markdown for PRs / LLMs), json (machine), tok (tab-separated, token-optimised for LLM pipes).', 'text')
             ->addOption('scope', null, InputOption::VALUE_REQUIRED, 'routes (runtime registry only) or all (adds commands / jobs / listeners / tests).', 'all')
@@ -63,14 +61,7 @@ final class BlastradiusCommand extends Command
             return self::INVALID;
         }
 
-        $base = $input->getOption('base');
-        $head = $input->getOption('head');
-        $envelope = new Envelope(
-            language: 'php',
-            rootPath: $project->rootPath,
-            base: is_string($base) && $base !== '' ? $base : null,
-            head: is_string($head) && $head !== '' ? $head : null,
-        );
+        $envelope = new Envelope(language: 'php', rootPath: $project->rootPath);
 
         $chained = ChainedEntrypointResolver::default()->collect(
             $project,

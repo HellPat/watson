@@ -1,7 +1,7 @@
 {# Tab-separated, token-optimised. Source report is omitted to keep
    the wire small. #}
 {%- for analysis in analyses -%}
-# {{ tool }} {{ version }} {{ analysis.name }} {{ language }} root={{ context.root }}{% if context.base is defined and context.head is defined %} base={{ short_rev(context.base) }} head={{ short_rev(context.head) }}{% endif %}
+# {{ tool }} {{ version }} {{ analysis.name }} {{ language }} root={{ context.root }}
 
 {% if not analysis.ok %}
 # error: {{ analysis.error.message|default('(unknown)') }}

@@ -30,8 +30,6 @@ final class Envelope implements \JsonSerializable
     public function __construct(
         public readonly string $language,
         public readonly string $rootPath,
-        public readonly ?string $base = null,
-        public readonly ?string $head = null,
     ) {
     }
 
@@ -70,19 +68,11 @@ final class Envelope implements \JsonSerializable
 
     public function jsonSerialize(): array
     {
-        $context = ['root' => $this->rootPath];
-        if ($this->base !== null) {
-            $context['base'] = $this->base;
-        }
-        if ($this->head !== null) {
-            $context['head'] = $this->head;
-        }
-
         return [
             'tool' => self::TOOL,
             'version' => self::TOOL_VERSION,
             'language' => $this->language,
-            'context' => $context,
+            'context' => ['root' => $this->rootPath],
             'sources' => array_map(static fn (SourceStatus $s) => $s->jsonSerialize(), $this->sources),
             'analyses' => $this->analyses,
         ];

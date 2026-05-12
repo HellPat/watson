@@ -189,7 +189,6 @@ final class Renderer
         $twig->addFunction(new TwigFunction('short_kind', [self::class, 'shortKind']));
         $twig->addFunction(new TwigFunction('reach_badge', [self::class, 'reachBadge']));
         $twig->addFunction(new TwigFunction('status_badge', [self::class, 'statusBadge']));
-        $twig->addFunction(new TwigFunction('short_rev', [self::class, 'shortRev']));
         $twig->addFunction(new TwigFunction('format_name', [self::class, 'formatName']));
         $twig->addFunction(new TwigFunction('format_triggers', [self::class, 'formatTriggers']));
         $twig->addFunction(new TwigFunction('format_entry_point_cell', [self::class, 'formatEntryPointCell']));
@@ -252,13 +251,6 @@ final class Renderer
             'failed'  => '❌ failed',
             default   => '·',
         };
-    }
-
-    /** Truncate a git rev / ref for compact display. */
-    public static function shortRev(string $rev): string
-    {
-        $rev = trim($rev);
-        return preg_match('/^[0-9a-f]{8,}$/i', $rev) === 1 ? substr($rev, 0, 8) : $rev;
     }
 
     /**

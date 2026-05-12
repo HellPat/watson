@@ -4,9 +4,6 @@
 {%- set bar = repeat('=', bar_width) -%}
 {{ bar }}
 {{ header }}
-{% if context.base is defined and context.head is defined -%}
-diff: {{ short_rev(context.base) }} -> {{ short_rev(context.head) }}
-{% endif -%}
 {{ bar }}
 
 {% for analysis in analyses -%}
