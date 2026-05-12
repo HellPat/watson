@@ -6,7 +6,6 @@ namespace Watson\Cli;
 
 use Watson\Cli\Reflection\StaticReflector;
 use Watson\Cli\Source\LaravelArtisanSource;
-use Watson\Core\Discovery\ConsoleCommandCollector;
 use Watson\Core\Discovery\JobCollector;
 use Watson\Core\Discovery\PhpUnitCollector;
 use Watson\Core\Entrypoint\EntryPoint;
@@ -15,10 +14,10 @@ use Watson\Core\Entrypoint\EntryPoint;
  * Collect Laravel entry points: routes, artisan commands, queued
  * jobs, phpunit tests.
  *
- * Runtime commands come from `artisan list` via
- * {@see LaravelArtisanSource}; the AST scan via
- * {@see ConsoleCommandCollector} catches the rest. Both sources are
- * merged + de-duped by handler FQN.
+ * Commands come from `artisan list --format=json` via
+ * {@see LaravelArtisanSource}. Jobs are AST-scanned from `app/Jobs/`
+ * because the Laravel runtime has no equivalent of `debug:container
+ * --tag=`.
  */
 final class LaravelEntrypointResolver
 {
@@ -38,15 +37,9 @@ final class LaravelEntrypointResolver
             return $entryPoints;
         }
 
-        $runtimeCommands = $source->commands();
-        $astCommands     = ConsoleCommandCollector::collect(
-            EntrypointMerging::commandScanDirs($project->rootPath),
-            $reflector,
-        );
-
         return [
             ...$entryPoints,
-            ...EntrypointMerging::dedupByHandlerFqn([...$runtimeCommands, ...$astCommands]),
+            ...$source->commands(),
             ...JobCollector::collect($project->rootPath . '/app/Jobs', $reflector),
             ...PhpUnitCollector::collect($project->rootPath . '/tests', $reflector),
         ];

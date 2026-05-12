@@ -6,7 +6,6 @@ namespace Watson\Cli;
 
 use Watson\Cli\Reflection\StaticReflector;
 use Watson\Cli\Source\SymfonyConsoleSource;
-use Watson\Core\Discovery\ConsoleCommandCollector;
 use Watson\Core\Discovery\PhpUnitCollector;
 use Watson\Core\Entrypoint\EntryPoint;
 
@@ -14,11 +13,10 @@ use Watson\Core\Entrypoint\EntryPoint;
  * Collect Symfony entry points: routes, console commands, message
  * handlers, phpunit tests.
  *
- * Runtime commands come from `bin/console debug:container` via
- * {@see SymfonyConsoleSource}; the AST scan via
- * {@see ConsoleCommandCollector} catches the rest (standalone CLI
- * tools, packages without a `bin/console` front-controller). Both
- * sources are merged + de-duped by handler FQN.
+ * Commands come from `bin/console debug:container --tag=console.command`
+ * via {@see SymfonyConsoleSource} — the same source the framework uses
+ * internally. No AST-based fallback: standalone CLI tools without a
+ * `bin/console` front-controller are out of scope.
  */
 final class SymfonyEntrypointResolver
 {
@@ -38,15 +36,9 @@ final class SymfonyEntrypointResolver
             return $entryPoints;
         }
 
-        $runtimeCommands = $source->commands();
-        $astCommands     = ConsoleCommandCollector::collect(
-            EntrypointMerging::commandScanDirs($project->rootPath),
-            $reflector,
-        );
-
         return [
             ...$entryPoints,
-            ...EntrypointMerging::dedupByHandlerFqn([...$runtimeCommands, ...$astCommands]),
+            ...$source->commands(),
             ...$source->messageHandlers(),
             ...PhpUnitCollector::collect($project->rootPath . '/tests', $reflector),
         ];
