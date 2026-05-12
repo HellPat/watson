@@ -1,0 +1,19 @@
+{% set affected = analysis.result.affected_entry_points|default([]) %}
+{% if affected is empty %}
+_💤 nothing reached. Diff did not touch any registered entry point or its direct callers._
+{% else %}
+<sub>🎯 `direct` — entry point's own handler file is in the diff &nbsp;·&nbsp; 🔗 `indirect` — handler reaches a changed file through its imports / `new` / static calls / type hints</sub>
+
+{% for kind, entries in analysis.result.groups %}
+<details>
+<summary>{{ kind_icon(kind) }} `{{ kind }}` — {{ entries|length }}</summary>
+
+| reach | affected by changed | entry point |
+|---|---|---|
+{% for entry in entries -%}
+| {{ reach_badge(entry.min_confidence|default(null))|escape_gfm }} | {{ format_triggers(entry.triggered_by|default([]))|escape_gfm }} | {{ format_entry_point_cell(format_name(entry.extra|default(null), entry.name|default('?')), entry.handler.fqn|default('?'), entry.handler.path|default(''), entry.handler.line|default(0), entry.reach_path|default(null))|escape_gfm }} |
+{% endfor %}
+</details>
+
+{% endfor %}
+{% endif %}

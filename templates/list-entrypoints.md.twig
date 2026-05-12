@@ -1,0 +1,19 @@
+{% set entry_points = analysis.result.entry_points|default([]) %}
+**{{ entry_points|length }} entry point{{ entry_points|length == 1 ? '' : 's' }}**
+
+{% if entry_points is empty %}
+_None detected._
+{% else %}
+{% for kind, entries in analysis.result.groups %}
+<details>
+<summary>{{ kind_icon(kind) }} `{{ kind }}` — {{ entries|length }}</summary>
+
+| entry point |
+|---|
+{% for entry in entries -%}
+| {{ format_entry_point_cell(format_name(entry.extra|default(null), entry.name|default('?')), entry.handler_fqn|default('?'), entry.handler_path|default(''), entry.handler_line|default(0), null)|escape_gfm }} |
+{% endfor %}
+</details>
+
+{% endfor %}
+{% endif %}

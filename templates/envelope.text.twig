@@ -1,0 +1,22 @@
+{# Plain-text wrapper for human terminals. #}
+{%- set header = 'watson ' ~ language ~ ' (root: ' ~ context.root ~ ')' -%}
+{%- set bar_width = max(1, min(80, header|length)) -%}
+{%- set bar = repeat('=', bar_width) -%}
+{{ bar }}
+{{ header }}
+{% if context.base is defined and context.head is defined -%}
+diff: {{ short_rev(context.base) }} -> {{ short_rev(context.head) }}
+{% endif -%}
+{{ bar }}
+
+{% for analysis in analyses -%}
+[{{ analysis.name }}]{{ analysis.ok ? '' : ' (FAILED)' }}
+
+{% if not analysis.ok %}
+  error: {{ analysis.error.message|default('(unknown)') }}
+
+{% else -%}
+{% include analysis.name ~ '.text.twig' %}
+
+{% endif -%}
+{% endfor -%}

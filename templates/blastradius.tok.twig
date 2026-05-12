@@ -1,0 +1,19 @@
+{%- set summary = analysis.result.summary|default({}) -%}
+{%- set affected = analysis.result.affected_entry_points|default([]) -%}
+{%- set unique_kinds = [] -%}
+{%- for entry in affected -%}
+  {%- set kind = entry.kind|default('?') -%}
+  {%- if kind not in unique_kinds -%}
+    {%- set unique_kinds = unique_kinds|merge([kind]) -%}
+  {%- endif -%}
+{%- endfor -%}
+{%- set kind_legend = [] -%}
+{%- for kind in unique_kinds|sort -%}
+  {%- set kind_legend = kind_legend|merge([short_kind(kind) ~ '=' ~ kind]) -%}
+{%- endfor -%}
+# files={{ summary.files_changed|default(0) }} affected={{ summary.entry_points_affected|default(0) }}
+# kinds: {{ kind_legend|join(' ') }}
+# fields: kind\tname\thandler\tpath:line\textra
+{% for entry in affected -%}
+{{ tok_row(short_kind(entry.kind|default('?')), entry.name|default('?'), entry.handler.fqn|default(''), entry.handler.path|default(''), entry.handler.line|default(0), entry.extra|default(null), context.root) }}
+{% endfor -%}
