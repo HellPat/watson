@@ -38,7 +38,16 @@ use Watson\Core\Reach\CallGraph\SymbolGraph;
 final class TransitiveReach
 {
     private const MAX_FILES_DEFAULT = 5000;
-    private const MAX_DEPTH_DEFAULT = 3;
+    /**
+     * `0` = unbounded reverse-BFS. Method-level edges (`MethodBodyAnalyzer`
+     * + `TypeMap`) are precise enough that deeper hops don't fan out into
+     * the unrelated subsystems that the original file-level reach engine
+     * suffered from. Empirically (easy-plu PR222, single ProductService
+     * edit) the BFS naturally saturates at 3 hops on real-world diffs;
+     * the cap exists for callers who explicitly want a tighter signal
+     * via `--max-depth=N` (N >= 1).
+     */
+    private const MAX_DEPTH_DEFAULT = 0;
 
     /**
      * @param list<EntryPoint>     $entryPoints
@@ -193,6 +202,7 @@ final class TransitiveReach
     private static function reverseBfs(SymbolGraph $graph, array &$reachable, array &$queue, int $maxDepth): array
     {
         $reverse = self::invertEdges($graph);
+        $unbounded = $maxDepth <= 0;
         $depth = [];
         foreach ($queue as $seed) {
             $depth[$seed] = 0;
@@ -201,7 +211,7 @@ final class TransitiveReach
         while ($queue !== []) {
             $sym = array_shift($queue);
             $d = $depth[$sym] ?? 0;
-            if ($d >= $maxDepth) {
+            if (!$unbounded && $d >= $maxDepth) {
                 continue;
             }
             foreach ($reverse[$sym] ?? [] as $caller) {

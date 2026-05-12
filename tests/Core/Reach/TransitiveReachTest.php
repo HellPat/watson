@@ -165,6 +165,56 @@ final class TransitiveReachTest extends TestCase
         self::assertSame([0], array_keys($hits));
     }
 
+    public function testMaxDepthTruncatesDeeperChain(): void
+    {
+        // Three-hop chain: Job → Outer → Inner → Service → DataMapper.
+        //   - maxDepth=1: reaches Inner (1 hop from Service); Outer at
+        //     hop 2 and Job at hop 3 are truncated.
+        //   - maxDepth=0: unbounded — Job is reached.
+        // Service is the propagate-seeded depth-0 node (class-level edge
+        // to DataMapper::* via `new DataMapper()`).
+        $mapper  = $this->project . '/app/Service/DataMapper.php';
+        $service = $this->project . '/app/Service/MyService.php';
+        $inner   = $this->project . '/app/Service/Inner.php';
+        $outer   = $this->project . '/app/Service/Outer.php';
+        $job     = $this->project . '/app/Jobs/MyJob.php';
+        file_put_contents($mapper, '<?php namespace App\Service; class DataMapper {}');
+        file_put_contents($service, '<?php
+            namespace App\Service;
+            class MyService {
+                public function run(): void { (new DataMapper()); }
+            }
+        ');
+        file_put_contents($inner, '<?php
+            namespace App\Service;
+            class Inner {
+                public function step(): void { (new MyService())->run(); }
+            }
+        ');
+        file_put_contents($outer, '<?php
+            namespace App\Service;
+            class Outer {
+                public function step(): void { (new Inner())->step(); }
+            }
+        ');
+        file_put_contents($job, '<?php
+            namespace App\Jobs;
+            use App\Service\Outer;
+            class MyJob {
+                public function handle(): void { (new Outer())->step(); }
+            }
+        ');
+
+        $reflector   = $this->makeLoader();
+        $entryPoints = [$this->ep('App\\Jobs\\MyJob', $job)];
+
+        $tight = TransitiveReach::affectedIndices($entryPoints, [self::cs($mapper)], $reflector, $this->project, 5000, 1);
+        self::assertSame([], $tight, 'depth=1 must not reach the entry point 3 hops away');
+
+        $unbounded = TransitiveReach::affectedIndices($entryPoints, [self::cs($mapper)], $reflector, $this->project, 5000, 0);
+        self::assertSame([0], array_keys($unbounded), 'depth=0 (unbounded, the new default) must reach the entry point');
+    }
+
     public function testIgnoresUnusedImports(): void
     {
         // Importing a class without using it must NOT pull it into the

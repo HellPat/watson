@@ -33,7 +33,7 @@ final class BlastradiusCommand extends Command
             ->addOption('format', null, InputOption::VALUE_REQUIRED, 'Output format: text (human terminal), md (markdown for PRs / LLMs), json (machine), tok (tab-separated, token-optimised for LLM pipes).', 'text')
             ->addOption('scope', null, InputOption::VALUE_REQUIRED, 'routes (runtime registry only) or all (adds commands / jobs / listeners / tests).', 'all')
             ->addOption('app-env', null, InputOption::VALUE_REQUIRED, 'APP_ENV passed to bin/console / artisan when collecting routes.', 'dev')
-            ->addOption('max-depth', null, InputOption::VALUE_REQUIRED, 'Maximum hops the indirect-reach BFS walks from each entry-point handler. Lower = tighter signal, higher = more recall.', '3')
+            ->addOption('max-depth', null, InputOption::VALUE_REQUIRED, 'Maximum hops the indirect-reach BFS walks from each entry-point handler. `0` (default) = unbounded — let the call graph saturate. Set N >= 1 to tighten the signal.', '0')
             ->setHelp(<<<HELP
                 Reads a unified diff from stdin and reports which framework entry
                 points reach the changed methods. Comment-only and whitespace-only

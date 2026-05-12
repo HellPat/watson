@@ -40,7 +40,7 @@ final class Blastradius
         array $changes,
         array $entryPoints,
         ?ClassLoader $classLoader = null,
-        int $maxDepth = 3,
+        int $maxDepth = 0,
     ): void {
         $symbolsByFile  = self::groupByFile($changes);
         $directHits     = array_fill_keys(FileLevelReach::affectedIndices($entryPoints, $changes), true);
