@@ -28,6 +28,17 @@ final class ConsoleCommandsAstSource implements EntrypointSource
 
     public function canHandle(Project $project): bool
     {
+        // AST-scanning the project's PSR-4 roots for `Command` subclasses
+        // is expensive on Laravel-sized apps (every class in `app/` gets
+        // reflected). Skip the scan when a runtime front-controller is
+        // present — the framework-specific runtime sources
+        // ({@see SymfonyCommandsRuntimeSource}, {@see LaravelCommandsRuntimeSource})
+        // already enumerate commands authoritatively. The AST scan is
+        // here only as a fallback for standalone CLI tools that ship
+        // neither `bin/console` nor `artisan`.
+        if (is_file($project->rootPath . '/bin/console') || is_file($project->rootPath . '/artisan')) {
+            return false;
+        }
         return ProjectComposer::isInstalled($project, 'symfony/console');
     }
 
