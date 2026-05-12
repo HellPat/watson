@@ -18,21 +18,11 @@ use PhpParser\Parser;
 use PhpParser\ParserFactory;
 
 /**
- * Fast AST-only class index for discovery collectors.
- *
- * Replaces the BetterReflection-based scan that the per-class
- * `isSubclassOf` / `implementsInterface` consumers in {@see PhpUnitCollector}
- * and {@see JobCollector} were paying through the nose for: on a
- * Laravel-sized `app/` tree those calls walk the inheritance chain via
- * BetterReflection's composer-aware locator, parsing vendor files for
- * each parent lookup and burning minutes per directory.
- *
- * This index does one nikic/php-parser pass per file, records each
- * class's direct ancestors as resolved FQN strings (NameResolver), and
- * answers `isSubclassOf()` via a hash-map BFS. Ancestors that aren't in
- * the index (typical vendor base classes) still match on direct
- * extends/implements — that's the case test classes and queued jobs
- * actually need.
+ * Single-pass AST class index over a set of directories. Records each
+ * declared class's direct ancestors as resolved FQN strings (via
+ * NameResolver) and answers `isSubclassOf()` with a hash-map BFS.
+ * Ancestors outside the indexed set (typical vendor base classes) still
+ * match on the first hop.
  */
 final class ClassIndex
 {
@@ -79,6 +69,30 @@ final class ClassIndex
     {
         foreach ($this->byFqn as $entry) {
             yield $entry;
+        }
+    }
+
+    /**
+     * Concrete classes that either extend / implement / use `$ancestorFqn`,
+     * or carry an `$attrFqn` attribute (when given). Abstract classes,
+     * interfaces, and traits are skipped — every collector wants the
+     * dispatchable concrete shape.
+     *
+     * @return iterable<ClassEntry>
+     */
+    public function concreteSubclassesOf(string $ancestorFqn, ?string $attrFqn = null): iterable
+    {
+        foreach ($this->byFqn as $entry) {
+            if ($entry->isAbstract || $entry->isInterface || $entry->isTrait) {
+                continue;
+            }
+            if ($this->isSubclassOf($entry->fqn, $ancestorFqn)) {
+                yield $entry;
+                continue;
+            }
+            if ($attrFqn !== null && isset($entry->attributeArgs[$attrFqn])) {
+                yield $entry;
+            }
         }
     }
 
@@ -168,10 +182,10 @@ final class ClassIndex
 final class ClassEntry
 {
     /**
-     * @param list<string> $implements resolved FQNs (NameResolver)
-     * @param list<string> $traits     resolved FQNs
-     * @param array<string, MethodEntry> $methods method-name → method
-     * @param list<string> $attributeNames attribute FQNs on the class
+     * @param list<string> $implements                       resolved FQNs (NameResolver)
+     * @param list<string> $traits                           resolved FQNs
+     * @param array<string, MethodEntry> $methods            method-name → method
+     * @param array<string, list<scalar|null>> $attributeArgs attribute FQN → positional + named arg scalars (named args come before positional in insertion order); presence of the key means the attribute is present, even when args is empty
      */
     public function __construct(
         public readonly string $fqn,
@@ -184,8 +198,14 @@ final class ClassEntry
         public readonly array $implements,
         public readonly array $traits,
         public readonly array $methods,
-        public readonly array $attributeNames,
+        public readonly array $attributeArgs,
     ) {}
+
+    public function shortName(): string
+    {
+        $pos = strrpos($this->fqn, '\\');
+        return $pos === false ? $this->fqn : substr($this->fqn, $pos + 1);
+    }
 }
 
 /**
@@ -193,13 +213,13 @@ final class ClassEntry
  */
 final class MethodEntry
 {
-    /** @param list<string> $attributeNames attribute FQNs on the method */
+    /** @param array<string, list<scalar|null>> $attributeArgs attribute FQN → arg scalars (same shape as ClassEntry::$attributeArgs) */
     public function __construct(
         public readonly string $name,
         public readonly int $startLine,
         public readonly bool $isPublic,
         public readonly bool $isAbstract,
-        public readonly array $attributeNames,
+        public readonly array $attributeArgs,
     ) {}
 }
 
@@ -255,7 +275,7 @@ final class ClassIndexVisitor extends NodeVisitorAbstract
                 startLine: $method->getStartLine() ?: 0,
                 isPublic: $method->isPublic(),
                 isAbstract: $method->isAbstract(),
-                attributeNames: self::attributeNames($method->attrGroups),
+                attributeArgs: self::attributeArgs($method->attrGroups),
             );
         }
 
@@ -270,21 +290,41 @@ final class ClassIndexVisitor extends NodeVisitorAbstract
             implements: $implements,
             traits: $traits,
             methods: $methods,
-            attributeNames: self::attributeNames($node->attrGroups ?? []),
+            attributeArgs: self::attributeArgs($node->attrGroups ?? []),
         );
         return null;
     }
 
     /**
+     * Capture each attribute's scalar argument values keyed by the
+     * attribute's resolved FQN. Non-scalar arguments (arrays, enums,
+     * class consts, …) are dropped — the discovery layer only needs
+     * the string-valued ones (e.g. `#[AsCommand('name')]`).
+     *
      * @param list<AttributeGroup> $groups
-     * @return list<string>
+     * @return array<string, list<scalar|null>>
      */
-    private static function attributeNames(array $groups): array
+    private static function attributeArgs(array $groups): array
     {
         $out = [];
         foreach ($groups as $group) {
             foreach ($group->attrs as $attr) {
-                $out[] = $attr->name->toString();
+                $name = $attr->name->toString();
+                $args = $out[$name] ?? [];
+                foreach ($attr->args as $arg) {
+                    $value = $arg->value;
+                    if ($value instanceof Node\Scalar\String_) {
+                        $args[] = $value->value;
+                    } elseif ($value instanceof Node\Scalar\Int_) {
+                        $args[] = $value->value;
+                    } elseif ($value instanceof Node\Scalar\Float_) {
+                        $args[] = $value->value;
+                    } elseif ($value instanceof Node\Expr\ConstFetch) {
+                        $bool = strtolower($value->name->toString());
+                        $args[] = $bool === 'true' ? true : ($bool === 'false' ? false : null);
+                    }
+                }
+                $out[$name] = $args;
             }
         }
         return $out;

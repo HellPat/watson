@@ -8,11 +8,9 @@ use Watson\Core\Entrypoint\EntryPoint;
 use Watson\Core\Entrypoint\Source;
 
 /**
- * Static-discovery collector for Laravel queued jobs. Walks the
- * supplied directory and yields any concrete class implementing
- * `Illuminate\Contracts\Queue\ShouldQueue`. Pure AST via
- * {@see ClassIndex} — we never `require_once` user code or pay
- * BetterReflection's per-class inheritance-walk cost.
+ * Yields one `laravel.job` {@see EntryPoint} per concrete class
+ * implementing `Illuminate\Contracts\Queue\ShouldQueue` in the given
+ * directory.
  */
 final class JobCollector
 {
@@ -26,26 +24,14 @@ final class JobCollector
         }
         $index = ClassIndex::buildFromDirs([$jobsDir]);
         $out = [];
-        foreach ($index->all() as $entry) {
-            if ($entry->isAbstract || $entry->isInterface || $entry->isTrait) {
-                continue;
-            }
-            if (!$index->isSubclassOf($entry->fqn, self::SHOULD_QUEUE_FQN)) {
-                continue;
-            }
-            $handlerFqn = $entry->fqn;
-            $line = $entry->startLine;
+        foreach ($index->concreteSubclassesOf(self::SHOULD_QUEUE_FQN) as $entry) {
             $handle = $entry->methods['handle'] ?? null;
-            if ($handle !== null) {
-                $handlerFqn = $entry->fqn . '::handle';
-                $line = $handle->startLine ?: $line;
-            }
             $out[] = new EntryPoint(
                 kind: 'laravel.job',
                 name: $entry->fqn,
-                handlerFqn: $handlerFqn,
+                handlerFqn: $handle !== null ? $entry->fqn . '::handle' : $entry->fqn,
                 handlerPath: $entry->file,
-                handlerLine: $line,
+                handlerLine: $handle?->startLine ?: $entry->startLine,
                 source: Source::Interface_,
             );
         }
