@@ -12,7 +12,7 @@ final class EntryPointTest extends TestCase
 {
     public function testSerialisationOmitsEmptyExtra(): void
     {
-        $ep = new EntryPoint(
+        $entryPoint = new EntryPoint(
             kind: 'symfony.route',
             name: 'home',
             handlerFqn: 'App\\HomeController::index',
@@ -21,7 +21,7 @@ final class EntryPointTest extends TestCase
             source: Source::Runtime,
         );
 
-        $payload = $ep->jsonSerialize();
+        $payload = $entryPoint->jsonSerialize();
 
         $this->assertSame('symfony.route', $payload['kind']);
         $this->assertSame('home', $payload['name']);
@@ -31,7 +31,7 @@ final class EntryPointTest extends TestCase
 
     public function testSerialisationKeepsExtraWhenPopulated(): void
     {
-        $ep = new EntryPoint(
+        $entryPoint = new EntryPoint(
             kind: 'laravel.route',
             name: 'show',
             handlerFqn: 'App\\Controller::show',
@@ -41,7 +41,7 @@ final class EntryPointTest extends TestCase
             extra: ['path' => '/users/{id}', 'methods' => ['GET']],
         );
 
-        $payload = $ep->jsonSerialize();
+        $payload = $entryPoint->jsonSerialize();
 
         $this->assertSame(['path' => '/users/{id}', 'methods' => ['GET']], $payload['extra']);
     }

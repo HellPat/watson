@@ -32,8 +32,8 @@ final class AffectedEntryPointBuilder
     public function build(array $entryPoints, array $directHits, array $indirectHits, array $symbolsByFile): array
     {
         $rows = [];
-        foreach ($entryPoints as $idx => $ep) {
-            $row = $this->buildRow($idx, $ep, $directHits, $indirectHits, $symbolsByFile);
+        foreach ($entryPoints as $idx => $entryPoint) {
+            $row = $this->buildRow($idx, $entryPoint, $directHits, $indirectHits, $symbolsByFile);
             if ($row !== null) {
                 $rows[] = $row;
             }
@@ -47,7 +47,7 @@ final class AffectedEntryPointBuilder
      * @param array<string, list<ChangedSymbol>> $symbolsByFile
      * @return ?array<string, mixed>
      */
-    private function buildRow(int $idx, EntryPoint $ep, array $directHits, array $indirectHits, array $symbolsByFile): ?array
+    private function buildRow(int $idx, EntryPoint $entryPoint, array $directHits, array $indirectHits, array $symbolsByFile): ?array
     {
         $isDirect   = isset($directHits[$idx]);
         $isIndirect = isset($indirectHits[$idx]);
@@ -56,18 +56,18 @@ final class AffectedEntryPointBuilder
         }
 
         $triggers = $isDirect
-            ? self::triggersForDirect($ep, $symbolsByFile)
+            ? self::triggersForDirect($entryPoint, $symbolsByFile)
             : ($indirectHits[$idx]['triggers'] ?? []);
 
         $row = [
-            'kind' => $ep->kind,
-            'name' => $ep->name,
+            'kind' => $entryPoint->kind,
+            'name' => $entryPoint->name,
             'handler' => [
-                'fqn'  => $ep->handlerFqn,
-                'path' => $this->relativise($ep->handlerPath),
-                'line' => $ep->handlerLine,
+                'fqn'  => $entryPoint->handlerFqn,
+                'path' => $this->relativise($entryPoint->handlerPath),
+                'line' => $entryPoint->handlerLine,
             ],
-            'extra' => $ep->extra ?? null,
+            'extra' => $entryPoint->extra ?? null,
             'min_confidence' => $isDirect ? 'NameOnly' : 'Indirect',
             'triggered_by'   => $this->serializeTriggers($triggers),
         ];
@@ -87,15 +87,15 @@ final class AffectedEntryPointBuilder
      * @param array<string, list<ChangedSymbol>> $symbolsByFile
      * @return list<ChangedSymbol>
      */
-    private static function triggersForDirect(EntryPoint $ep, array $symbolsByFile): array
+    private static function triggersForDirect(EntryPoint $entryPoint, array $symbolsByFile): array
     {
-        $handlerReal = realpath($ep->handlerPath);
-        $key = $handlerReal !== false ? $handlerReal : $ep->handlerPath;
+        $handlerReal = realpath($entryPoint->handlerPath);
+        $key = $handlerReal !== false ? $handlerReal : $entryPoint->handlerPath;
         if (isset($symbolsByFile[$key])) {
             return $symbolsByFile[$key];
         }
-        if ($handlerReal !== false && isset($symbolsByFile[$ep->handlerPath])) {
-            return $symbolsByFile[$ep->handlerPath];
+        if ($handlerReal !== false && isset($symbolsByFile[$entryPoint->handlerPath])) {
+            return $symbolsByFile[$entryPoint->handlerPath];
         }
         return [];
     }
@@ -108,13 +108,13 @@ final class AffectedEntryPointBuilder
     {
         $seen = [];
         $out = [];
-        foreach ($triggers as $cs) {
-            $key = $cs->symbol() . '@' . $cs->filePath;
+        foreach ($triggers as $changedSymbol) {
+            $key = $changedSymbol->symbol() . '@' . $changedSymbol->filePath;
             if (isset($seen[$key])) {
                 continue;
             }
             $seen[$key] = true;
-            $out[] = $cs->withRelativeFile($this->projectRoot)->jsonSerialize();
+            $out[] = $changedSymbol->withRelativeFile($this->projectRoot)->jsonSerialize();
         }
         return $out;
     }

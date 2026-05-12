@@ -52,9 +52,9 @@ final class TransitiveReachTest extends TestCase
         ');
 
         $reflector = $this->makeLoader();
-        $eps       = [$this->ep('App\\Jobs\\MyJob', $job)];
+        $entryPoints       = [$this->ep('App\\Jobs\\MyJob', $job)];
 
-        $hits = TransitiveReach::affectedIndices($eps, [self::cs($service)], $reflector, $this->project);
+        $hits = TransitiveReach::affectedIndices($entryPoints, [self::cs($service)], $reflector, $this->project);
 
         self::assertSame([0], array_keys($hits));
     }
@@ -79,9 +79,9 @@ final class TransitiveReachTest extends TestCase
         ');
 
         $reflector = $this->makeLoader();
-        $eps       = [$this->ep('App\\Jobs\\MyJob', $job)];
+        $entryPoints       = [$this->ep('App\\Jobs\\MyJob', $job)];
 
-        $hits = TransitiveReach::affectedIndices($eps, [self::cs($other)], $reflector, $this->project);
+        $hits = TransitiveReach::affectedIndices($entryPoints, [self::cs($other)], $reflector, $this->project);
 
         self::assertSame([], $hits);
     }
@@ -106,9 +106,9 @@ final class TransitiveReachTest extends TestCase
         ');
 
         $reflector = $this->makeLoader();
-        $eps       = [$this->ep('App\\Jobs\\MyJob', $job)];
+        $entryPoints       = [$this->ep('App\\Jobs\\MyJob', $job)];
 
-        $hits = TransitiveReach::affectedIndices($eps, [self::cs($service)], $reflector, $this->project);
+        $hits = TransitiveReach::affectedIndices($entryPoints, [self::cs($service)], $reflector, $this->project);
 
         self::assertSame([0], array_keys($hits));
     }
@@ -129,9 +129,9 @@ final class TransitiveReachTest extends TestCase
         ');
 
         $reflector = $this->makeLoader();
-        $eps       = [$this->ep('App\\Jobs\\MyJob', $job)];
+        $entryPoints       = [$this->ep('App\\Jobs\\MyJob', $job)];
 
-        $hits = TransitiveReach::affectedIndices($eps, [self::cs($service)], $reflector, $this->project);
+        $hits = TransitiveReach::affectedIndices($entryPoints, [self::cs($service)], $reflector, $this->project);
 
         self::assertSame([0], array_keys($hits));
     }
@@ -158,9 +158,9 @@ final class TransitiveReachTest extends TestCase
         ');
 
         $reflector = $this->makeLoader();
-        $eps       = [$this->ep('App\\Jobs\\MyJob', $job)];
+        $entryPoints       = [$this->ep('App\\Jobs\\MyJob', $job)];
 
-        $hits = TransitiveReach::affectedIndices($eps, [self::cs($mapper)], $reflector, $this->project);
+        $hits = TransitiveReach::affectedIndices($entryPoints, [self::cs($mapper)], $reflector, $this->project);
 
         self::assertSame([0], array_keys($hits));
     }
@@ -189,12 +189,12 @@ final class TransitiveReachTest extends TestCase
         ');
 
         $reflector = $this->makeLoader();
-        $eps       = [$this->ep('App\\Jobs\\MyJob', $job)];
+        $entryPoints       = [$this->ep('App\\Jobs\\MyJob', $job)];
 
         // A change in the Unused class must not flag the job — only
         // a change in MyService should.
-        self::assertSame([], array_keys(TransitiveReach::affectedIndices($eps, [self::cs($other)], $reflector, $this->project)));
-        self::assertSame([0], array_keys(TransitiveReach::affectedIndices($eps, [self::cs($service)], $reflector, $this->project)));
+        self::assertSame([], array_keys(TransitiveReach::affectedIndices($entryPoints, [self::cs($other)], $reflector, $this->project)));
+        self::assertSame([0], array_keys(TransitiveReach::affectedIndices($entryPoints, [self::cs($service)], $reflector, $this->project)));
     }
 
     public function testMethodLevelPrecisionFlagsCallerThatUsesChangedMethod(): void
@@ -217,11 +217,11 @@ final class TransitiveReachTest extends TestCase
             }');
 
         $reflector = $this->makeLoader();
-        $eps       = [$this->ep('App\\Jobs\\MyJob', $job)];
+        $entryPoints       = [$this->ep('App\\Jobs\\MyJob', $job)];
 
         // Change MyService::a → MyJob is flagged.
         $hits = TransitiveReach::affectedIndices(
-            $eps,
+            $entryPoints,
             [new ChangedSymbol($service, 'App\\Service\\MyService', 'a', 1, 1)],
             $reflector,
             $this->project,
@@ -249,10 +249,10 @@ final class TransitiveReachTest extends TestCase
             }');
 
         $reflector = $this->makeLoader();
-        $eps       = [$this->ep('App\\Jobs\\MyJob', $job)];
+        $entryPoints       = [$this->ep('App\\Jobs\\MyJob', $job)];
 
         $hits = TransitiveReach::affectedIndices(
-            $eps,
+            $entryPoints,
             [new ChangedSymbol($service, 'App\\Service\\MyService', 'b', 1, 1)],
             $reflector,
             $this->project,
@@ -292,10 +292,10 @@ final class TransitiveReachTest extends TestCase
             }');
 
         $reflector = $this->makeLoader();
-        $eps       = [$this->ep('App\\Jobs\\MyJob', $job)];
+        $entryPoints       = [$this->ep('App\\Jobs\\MyJob', $job)];
 
         $hits = TransitiveReach::affectedIndices(
-            $eps,
+            $entryPoints,
             [new ChangedSymbol($service, 'App\\Service\\MyService', 'b', 1, 1)],
             $reflector,
             $this->project,
@@ -317,10 +317,10 @@ final class TransitiveReachTest extends TestCase
             }');
 
         $reflector = $this->makeLoader();
-        $eps       = [$this->ep('App\\Jobs\\MyJob', $job)];
+        $entryPoints       = [$this->ep('App\\Jobs\\MyJob', $job)];
 
-        $cs   = new ChangedSymbol($service, 'App\\Service\\MyService', 'run', 1, 1);
-        $hits = TransitiveReach::affectedIndices($eps, [$cs], $reflector, $this->project);
+        $changedSymbol   = new ChangedSymbol($service, 'App\\Service\\MyService', 'run', 1, 1);
+        $hits = TransitiveReach::affectedIndices($entryPoints, [$changedSymbol], $reflector, $this->project);
         self::assertArrayHasKey(0, $hits);
         $syms = array_map(fn (ChangedSymbol $t) => $t->symbol(), $hits[0]['triggers']);
         self::assertContains('App\\Service\\MyService::run', $syms);
@@ -329,8 +329,8 @@ final class TransitiveReachTest extends TestCase
     public function testReturnsEmptyWhenNoChangedFiles(): void
     {
         $reflector = $this->makeLoader();
-        $eps       = [$this->ep('App\\Jobs\\MyJob', $this->project . '/app/Jobs/MyJob.php')];
-        self::assertSame([], TransitiveReach::affectedIndices($eps, [], $reflector, $this->project));
+        $entryPoints       = [$this->ep('App\\Jobs\\MyJob', $this->project . '/app/Jobs/MyJob.php')];
+        self::assertSame([], TransitiveReach::affectedIndices($entryPoints, [], $reflector, $this->project));
     }
 
     private static function cs(string $path): ChangedSymbol

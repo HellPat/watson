@@ -74,7 +74,7 @@ final class BlastradiusCommand extends Command
             head: is_string($head) && $head !== '' ? $head : null,
         );
 
-        $eps = EntrypointResolver::collect($project, [
+        $entryPoints = EntrypointResolver::collect($project, [
             'scope' => (string) $input->getOption('scope'),
             'app_env' => (string) $input->getOption('app-env'),
         ]);
@@ -82,14 +82,14 @@ final class BlastradiusCommand extends Command
         if ($output->isVerbose()) {
             $output->writeln(sprintf(
                 '<comment>watson: %d entry points · %d changed symbols</comment>',
-                count($eps),
+                count($entryPoints),
                 count($changes),
             ));
         }
 
         $classLoader = self::loadConsumerClassLoader($project->rootPath);
         $maxDepth    = max(0, (int) $input->getOption('max-depth'));
-        Blastradius::run($envelope, $project->rootPath, $changes, $eps, $classLoader, $maxDepth);
+        Blastradius::run($envelope, $project->rootPath, $changes, $entryPoints, $classLoader, $maxDepth);
 
         $output->write(Renderer::render((string) $input->getOption('format'), $envelope));
 

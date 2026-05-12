@@ -42,17 +42,18 @@ final class RendererTest extends TestCase
         $out = Renderer::render(Renderer::FORMAT_MD, $envelope);
 
         // GFM table headers (pipe-delimited).
-        $this->assertStringContainsString('| reach | affected by changed | name | handler |', $out);
+        $this->assertStringContainsString('| reach | affected by changed | entry point |', $out);
         // GFM separator row.
-        $this->assertStringContainsString('|---|---|---|---|', $out);
+        $this->assertStringContainsString('|---|---|---|', $out);
         // Kind icons next to the kind label.
         $this->assertStringContainsString('🛣️', $out);
         $this->assertStringContainsString('⌨️', $out);
         // Reach badges (no backticks inside table cells).
         $this->assertStringContainsString('🎯 direct', $out);
         $this->assertStringContainsString('🔗 indirect', $out);
-        // Handler FQN + path:line on a single line inside the cell.
-        $this->assertStringContainsString('App\\HomeController::index (src/HomeController.php:8)', $out);
+        // Handler FQN + path:line live inside the combined entry-point cell.
+        $this->assertStringContainsString('<code>App\\HomeController::index</code>', $out);
+        $this->assertStringContainsString('src/HomeController.php:8', $out);
     }
 
     public function testTextRendersSummaryAndCounts(): void
@@ -110,7 +111,7 @@ final class RendererTest extends TestCase
         ]);
         $out = Renderer::render(Renderer::FORMAT_MD, $envelope);
 
-        $this->assertStringContainsString('| reach | affected by changed | name | handler |', $out);
+        $this->assertStringContainsString('| reach | affected by changed | entry point |', $out);
         $this->assertStringContainsString('App\\Service\\ProductService::userRankedPluNumbers', $out);
         $this->assertStringContainsString('🔗 indirect', $out);
     }
@@ -155,12 +156,12 @@ final class RendererTest extends TestCase
         $rebuilt = new Envelope(language: 'php', framework: 'symfony', rootPath: '/x', base: 'main', head: 'HEAD');
         foreach ($analyses as $a) {
             if (($a['name'] ?? '') === 'blastradius') {
-                $eps = $a['result']['affected_entry_points'] ?? [];
-                foreach ($eps as $i => &$ep) {
-                    $ep['min_confidence'] = $confidences[$i] ?? 'NameOnly';
+                $entryPoints = $a['result']['affected_entry_points'] ?? [];
+                foreach ($entryPoints as $i => &$entryPoint) {
+                    $entryPoint['min_confidence'] = $confidences[$i] ?? 'NameOnly';
                 }
-                unset($ep);
-                $a['result']['affected_entry_points'] = $eps;
+                unset($entryPoint);
+                $a['result']['affected_entry_points'] = $entryPoints;
             }
             $rebuilt->pushAnalysis($a['name'], $a['version'], $a['result'] ?? []);
         }

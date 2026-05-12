@@ -57,8 +57,8 @@ final class AstDiffMapper
             $oldMap  = self::buildSymbolMap($file['oldText'], $parser);
             $newMap  = self::buildSymbolMap($file['newText'], $parser);
 
-            foreach (self::diffMaps($oldMap, $newMap, $absPath) as $cs) {
-                $out[] = $cs;
+            foreach (self::diffMaps($oldMap, $newMap, $absPath) as $changedSymbol) {
+                $out[] = $changedSymbol;
             }
         }
 
@@ -276,8 +276,8 @@ final class AstDiffMapper
                 continue; // semantic no-op
             }
 
-            $cs = self::toChangedSymbol($key, $absPath, $n ?? $o);
-            $out[] = $cs;
+            $changedSymbol = self::toChangedSymbol($key, $absPath, $n ?? $o);
+            $out[] = $changedSymbol;
         }
 
         return $out;

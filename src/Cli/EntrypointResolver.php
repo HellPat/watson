@@ -8,6 +8,7 @@ use Composer\Autoload\ClassLoader;
 use Watson\Cli\Reflection\StaticReflector;
 use Watson\Cli\Source\LaravelArtisanSource;
 use Watson\Cli\Source\SymfonyConsoleSource;
+use Watson\Core\Discovery\ConsoleCommandCollector;
 use Watson\Core\Discovery\JobCollector;
 use Watson\Core\Discovery\PhpUnitCollector;
 use Watson\Core\Entrypoint\EntryPoint;
@@ -60,17 +61,60 @@ final class EntrypointResolver
     ): array {
         $source = new SymfonyConsoleSource($project, $reflector, $appEnv);
 
-        $eps = $source->routes();
+        $entryPoints = $source->routes();
         if ($scope === self::SCOPE_ALL) {
-            $eps = [
-                ...$eps,
-                ...$source->commands(),
+            $runtimeCommands = $source->commands();
+            // Merge runtime + AST-discovered commands so projects without
+            // a `bin/console` front-controller (standalone CLI tools)
+            // still surface their commands. De-dup by handler FQN.
+            $astCommands = ConsoleCommandCollector::collect(
+                self::commandScanDirs($project->rootPath),
+                $reflector,
+            );
+            $entryPoints = [
+                ...$entryPoints,
+                ...self::dedupByHandlerFqn([...$runtimeCommands, ...$astCommands]),
                 ...$source->messageHandlers(),
                 ...PhpUnitCollector::collect($project->rootPath . '/tests', $reflector),
             ];
         }
 
-        return $eps;
+        return $entryPoints;
+    }
+
+    /**
+     * Directories to AST-scan for `Symfony\Component\Console\Command\Command`
+     * subclasses. Covers the Symfony default (`src/`), Laravel's
+     * `app/Console/Commands`, and any extra location callers add via
+     * `--project=…`.
+     *
+     * @return list<string>
+     */
+    private static function commandScanDirs(string $rootPath): array
+    {
+        $candidates = [
+            $rootPath . '/src',
+            $rootPath . '/app/Console/Commands',
+        ];
+        return array_values(array_filter($candidates, 'is_dir'));
+    }
+
+    /**
+     * @param list<EntryPoint> $entryPoints
+     * @return list<EntryPoint>
+     */
+    private static function dedupByHandlerFqn(array $entryPoints): array
+    {
+        $seen = [];
+        $out = [];
+        foreach ($entryPoints as $entryPoint) {
+            if (isset($seen[$entryPoint->handlerFqn])) {
+                continue;
+            }
+            $seen[$entryPoint->handlerFqn] = true;
+            $out[] = $entryPoint;
+        }
+        return $out;
     }
 
     /** @return list<EntryPoint> */
@@ -82,16 +126,21 @@ final class EntrypointResolver
     ): array {
         $source = new LaravelArtisanSource($project, $reflector, $appEnv);
 
-        $eps = $source->routes();
+        $entryPoints = $source->routes();
         if ($scope === self::SCOPE_ALL) {
-            $eps = [
-                ...$eps,
-                ...$source->commands(),
+            $runtimeCommands = $source->commands();
+            $astCommands = ConsoleCommandCollector::collect(
+                self::commandScanDirs($project->rootPath),
+                $reflector,
+            );
+            $entryPoints = [
+                ...$entryPoints,
+                ...self::dedupByHandlerFqn([...$runtimeCommands, ...$astCommands]),
                 ...JobCollector::collect($project->rootPath . '/app/Jobs', $reflector),
                 ...PhpUnitCollector::collect($project->rootPath . '/tests', $reflector),
             ];
         }
 
-        return $eps;
+        return $entryPoints;
     }
 }

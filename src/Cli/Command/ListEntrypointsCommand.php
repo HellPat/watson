@@ -33,7 +33,7 @@ final class ListEntrypointsCommand extends Command
         $startDir = (string) ($input->getOption('project') ?? (getcwd() ?: '.'));
         $project = ProjectDetector::detect($startDir);
 
-        $eps = EntrypointResolver::collect($project, [
+        $entryPoints = EntrypointResolver::collect($project, [
             'scope' => (string) $input->getOption('scope'),
             'app_env' => (string) $input->getOption('app-env'),
         ]);
@@ -41,7 +41,7 @@ final class ListEntrypointsCommand extends Command
         if ($output->isVerbose()) {
             $output->writeln(sprintf(
                 '<comment>watson: collected %d entry points from %s</comment>',
-                count($eps),
+                count($entryPoints),
                 $project->rootPath,
             ));
         }
@@ -52,7 +52,7 @@ final class ListEntrypointsCommand extends Command
             rootPath: $project->rootPath,
         );
         $envelope->pushAnalysis('list-entrypoints', Envelope::TOOL_VERSION, [
-            'entry_points' => $eps,
+            'entry_points' => $entryPoints,
         ]);
 
         $output->write(Renderer::render((string) $input->getOption('format'), $envelope));

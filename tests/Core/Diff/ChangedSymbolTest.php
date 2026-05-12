@@ -11,20 +11,20 @@ final class ChangedSymbolTest extends TestCase
 {
     public function testSymbolForClassMethod(): void
     {
-        $cs = new ChangedSymbol('/abs/Foo.php', 'App\\Foo', 'bar', 10, 20);
-        self::assertSame('App\\Foo::bar', $cs->symbol());
+        $changedSymbol = new ChangedSymbol('/abs/Foo.php', 'App\\Foo', 'bar', 10, 20);
+        self::assertSame('App\\Foo::bar', $changedSymbol->symbol());
     }
 
     public function testSymbolForClassWildcard(): void
     {
-        $cs = new ChangedSymbol('/abs/Foo.php', 'App\\Foo', null, 1, 50);
-        self::assertSame('App\\Foo::*', $cs->symbol());
+        $changedSymbol = new ChangedSymbol('/abs/Foo.php', 'App\\Foo', null, 1, 50);
+        self::assertSame('App\\Foo::*', $changedSymbol->symbol());
     }
 
     public function testSymbolForFileLevel(): void
     {
-        $cs = new ChangedSymbol('/abs/dir/file.php', null, null, 1, 80);
-        self::assertSame('file.php', $cs->symbol());
+        $changedSymbol = new ChangedSymbol('/abs/dir/file.php', null, null, 1, 80);
+        self::assertSame('file.php', $changedSymbol->symbol());
     }
 
     public function testWithRelativeFileStripsProjectRoot(): void
@@ -33,8 +33,8 @@ final class ChangedSymbolTest extends TestCase
         mkdir($tmp . '/app/Service', 0700, true);
         file_put_contents($tmp . '/app/Service/Foo.php', '<?php class Foo {}');
         try {
-            $cs = new ChangedSymbol($tmp . '/app/Service/Foo.php', 'App\\Service\\Foo', 'bar', 10, 20);
-            $rel = $cs->withRelativeFile($tmp);
+            $changedSymbol = new ChangedSymbol($tmp . '/app/Service/Foo.php', 'App\\Service\\Foo', 'bar', 10, 20);
+            $rel = $changedSymbol->withRelativeFile($tmp);
             self::assertSame('app/Service/Foo.php', $rel->filePath);
             // Other fields unchanged.
             self::assertSame('App\\Service\\Foo', $rel->classFqn);
@@ -51,15 +51,15 @@ final class ChangedSymbolTest extends TestCase
 
     public function testWithRelativeFileLeavesOutsidePathsUntouched(): void
     {
-        $cs = new ChangedSymbol('/abs/elsewhere/Foo.php', 'App\\Foo', null, 1, 1);
-        $rel = $cs->withRelativeFile('/different/root');
+        $changedSymbol = new ChangedSymbol('/abs/elsewhere/Foo.php', 'App\\Foo', null, 1, 1);
+        $rel = $changedSymbol->withRelativeFile('/different/root');
         self::assertSame('/abs/elsewhere/Foo.php', $rel->filePath);
     }
 
     public function testJsonSerializableEmitsSymbol(): void
     {
-        $cs = new ChangedSymbol('/abs/Foo.php', 'App\\Foo', 'bar', 10, 20);
-        $encoded = json_encode($cs);
+        $changedSymbol = new ChangedSymbol('/abs/Foo.php', 'App\\Foo', 'bar', 10, 20);
+        $encoded = json_encode($changedSymbol);
         self::assertIsString($encoded);
         $decoded = json_decode($encoded, true);
         self::assertSame('App\\Foo::bar', $decoded['symbol']);

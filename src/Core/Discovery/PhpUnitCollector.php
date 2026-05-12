@@ -62,8 +62,8 @@ final class PhpUnitCollector
             $traverser = new NodeTraverser();
             $traverser->addVisitor($visitor);
             $traverser->traverse($ast);
-            foreach ($visitor->entryPoints as $ep) {
-                $out[] = $ep;
+            foreach ($visitor->entryPoints as $entryPoint) {
+                $out[] = $entryPoint;
             }
         }
 

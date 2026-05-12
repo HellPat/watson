@@ -89,27 +89,27 @@ final class TransitiveReach
         $classLevel = [];
         $methodName = [];
 
-        foreach ($changes as $cs) {
-            if ($cs->classFqn !== null && $cs->methodName !== null) {
-                $sym = $cs->classFqn . '::' . $cs->methodName;
-                $exact[$sym][] = $cs;
-                $classLevel[$cs->classFqn][] = $cs;
-                $methodName[$cs->methodName][] = $cs;
+        foreach ($changes as $changedSymbol) {
+            if ($changedSymbol->classFqn !== null && $changedSymbol->methodName !== null) {
+                $sym = $changedSymbol->classFqn . '::' . $changedSymbol->methodName;
+                $exact[$sym][] = $changedSymbol;
+                $classLevel[$changedSymbol->classFqn][] = $changedSymbol;
+                $methodName[$changedSymbol->methodName][] = $changedSymbol;
                 continue;
             }
-            if ($cs->classFqn !== null) {
-                $classLevel[$cs->classFqn][] = $cs;
+            if ($changedSymbol->classFqn !== null) {
+                $classLevel[$changedSymbol->classFqn][] = $changedSymbol;
                 continue;
             }
             // File-level change — expand to every symbol the graph
             // recorded for this file.
-            foreach (self::resolveFileSymbols($cs->filePath, $graph) as $sym) {
-                $exact[$sym][] = $cs;
+            foreach (self::resolveFileSymbols($changedSymbol->filePath, $graph) as $sym) {
+                $exact[$sym][] = $changedSymbol;
                 [$cls, $tail] = self::split($sym);
                 if ($cls !== null) {
-                    $classLevel[$cls][] = $cs;
+                    $classLevel[$cls][] = $changedSymbol;
                     if ($tail !== null && $tail !== '*') {
-                        $methodName[$tail][] = $cs;
+                        $methodName[$tail][] = $changedSymbol;
                     }
                 }
             }
@@ -226,8 +226,8 @@ final class TransitiveReach
     private static function mapEntryPoints(array $entryPoints, array $reachable, array $nextHop): array
     {
         $hits = [];
-        foreach ($entryPoints as $idx => $ep) {
-            $sym = $ep->handlerFqn;
+        foreach ($entryPoints as $idx => $entryPoint) {
+            $sym = $entryPoint->handlerFqn;
             if ($sym === '' || strpos($sym, '::') === false) {
                 continue;
             }
@@ -287,13 +287,13 @@ final class TransitiveReach
     {
         $seen = [];
         $out = [];
-        foreach ([...$a, ...$b] as $cs) {
-            $key = $cs->symbol() . '@' . $cs->filePath;
+        foreach ([...$a, ...$b] as $changedSymbol) {
+            $key = $changedSymbol->symbol() . '@' . $changedSymbol->filePath;
             if (isset($seen[$key])) {
                 continue;
             }
             $seen[$key] = true;
-            $out[] = $cs;
+            $out[] = $changedSymbol;
         }
         return $out;
     }
@@ -355,12 +355,12 @@ final class TransitiveReach
     private static function collectSeedFiles(array $entryPoints): array
     {
         $seeds = [];
-        foreach ($entryPoints as $ep) {
-            if ($ep->handlerPath === '') {
+        foreach ($entryPoints as $entryPoint) {
+            if ($entryPoint->handlerPath === '') {
                 continue;
             }
-            $real = realpath($ep->handlerPath);
-            $key = $real !== false ? $real : $ep->handlerPath;
+            $real = realpath($entryPoint->handlerPath);
+            $key = $real !== false ? $real : $entryPoint->handlerPath;
             $seeds[$key] = true;
         }
         return array_keys($seeds);

@@ -154,23 +154,23 @@ final class Renderer
      */
     private static function tokListRows(array $result, string $root, array &$headerLines): array
     {
-        $eps = is_array($result['entry_points'] ?? null) ? $result['entry_points'] : [];
+        $entryPoints = is_array($result['entry_points'] ?? null) ? $result['entry_points'] : [];
         $rows = [];
         $kinds = [];
-        foreach ($eps as $ep) {
-            $kind = (string) ($ep['kind'] ?? '?');
+        foreach ($entryPoints as $entryPoint) {
+            $kind = (string) ($entryPoint['kind'] ?? '?');
             $kinds[$kind] = true;
             $rows[] = self::tokRow(
                 self::shortKind($kind),
-                (string) ($ep['name'] ?? '?'),
-                (string) ($ep['handler_fqn'] ?? ''),
-                (string) ($ep['handler_path'] ?? ''),
-                (int) ($ep['handler_line'] ?? 0),
-                is_array($ep['extra'] ?? null) ? $ep['extra'] : null,
+                (string) ($entryPoint['name'] ?? '?'),
+                (string) ($entryPoint['handler_fqn'] ?? ''),
+                (string) ($entryPoint['handler_path'] ?? ''),
+                (int) ($entryPoint['handler_line'] ?? 0),
+                is_array($entryPoint['extra'] ?? null) ? $entryPoint['extra'] : null,
                 $root,
             );
         }
-        $headerLines[] = sprintf('# entrypoints=%d', count($eps));
+        $headerLines[] = sprintf('# entrypoints=%d', count($entryPoints));
         $headerLines[] = self::tokKindLegend(array_keys($kinds));
         $headerLines[] = '# fields: kind\tname\thandler\tpath:line\textra';
 
@@ -198,17 +198,17 @@ final class Renderer
         }
         $rows = [];
         $kinds = [];
-        foreach ($affected as $ep) {
-            $kind = (string) ($ep['kind'] ?? '?');
+        foreach ($affected as $entryPoint) {
+            $kind = (string) ($entryPoint['kind'] ?? '?');
             $kinds[$kind] = true;
-            $handler = is_array($ep['handler'] ?? null) ? $ep['handler'] : [];
+            $handler = is_array($entryPoint['handler'] ?? null) ? $entryPoint['handler'] : [];
             $rows[] = self::tokRow(
                 self::shortKind($kind),
-                (string) ($ep['name'] ?? '?'),
+                (string) ($entryPoint['name'] ?? '?'),
                 (string) ($handler['fqn'] ?? ''),
                 (string) ($handler['path'] ?? ''),
                 (int) ($handler['line'] ?? 0),
-                is_array($ep['extra'] ?? null) ? $ep['extra'] : null,
+                is_array($entryPoint['extra'] ?? null) ? $entryPoint['extra'] : null,
                 $root,
             );
         }
@@ -296,25 +296,30 @@ final class Renderer
     private static function renderAnalysis(string $name, array $result, array &$lines): void
     {
         if ($name === 'list-entrypoints') {
-            $eps = $result['entry_points'] ?? [];
-            $lines[] = sprintf('**%d entry point%s**', count($eps), count($eps) === 1 ? '' : 's');
+            $entryPoints = $result['entry_points'] ?? [];
+            $lines[] = sprintf('**%d entry point%s**', count($entryPoints), count($entryPoints) === 1 ? '' : 's');
             $lines[] = '';
-            if ($eps === []) {
+            if ($entryPoints === []) {
                 $lines[] = '_None detected._';
 
                 return;
             }
-            foreach (self::groupByKind($eps) as $kind => $entries) {
+            foreach (self::groupByKind($entryPoints) as $kind => $entries) {
                 $rows = [];
-                foreach ($entries as $ep) {
+                foreach ($entries as $entryPoint) {
                     $rows[] = [
-                        self::formatName($ep['extra'] ?? null, $ep['name'] ?? '?'),
-                        self::formatHandlerCell($ep['handler_fqn'] ?? '?', $ep['handler_path'] ?? '', (int) ($ep['handler_line'] ?? 0), null),
+                        self::formatEntryPointCell(
+                            self::formatName($entryPoint['extra'] ?? null, $entryPoint['name'] ?? '?'),
+                            $entryPoint['handler_fqn'] ?? '?',
+                            $entryPoint['handler_path'] ?? '',
+                            (int) ($entryPoint['handler_line'] ?? 0),
+                            null,
+                        ),
                     ];
                 }
                 $lines[] = sprintf('#### %s `%s` — %d', self::kindIcon($kind), $kind, count($entries));
                 $lines[] = '';
-                self::appendGfmTable($lines, ['name', 'handler'], $rows);
+                self::appendGfmTable($lines, ['entry point'], $rows);
                 $lines[] = '';
             }
 
@@ -332,26 +337,26 @@ final class Renderer
             $lines[] = '';
             foreach (self::groupByKind($affected) as $kind => $entries) {
                 $rows = [];
-                foreach ($entries as $ep) {
+                foreach ($entries as $entryPoint) {
                     /** @var list<string>|null $reachPath */
-                    $reachPath = isset($ep['reach_path']) && is_array($ep['reach_path']) ? array_values($ep['reach_path']) : null;
+                    $reachPath = isset($entryPoint['reach_path']) && is_array($entryPoint['reach_path']) ? array_values($entryPoint['reach_path']) : null;
                     /** @var list<array{symbol:string,file?:string,class:?string,method:?string}> $triggers */
-                    $triggers = isset($ep['triggered_by']) && is_array($ep['triggered_by']) ? $ep['triggered_by'] : [];
+                    $triggers = isset($entryPoint['triggered_by']) && is_array($entryPoint['triggered_by']) ? $entryPoint['triggered_by'] : [];
                     $rows[] = [
-                        self::reachBadge($ep['min_confidence'] ?? null),
+                        self::reachBadge($entryPoint['min_confidence'] ?? null),
                         self::formatTriggers($triggers),
-                        self::formatName($ep['extra'] ?? null, $ep['name'] ?? '?'),
-                        self::formatHandlerCell(
-                            $ep['handler']['fqn'] ?? '?',
-                            $ep['handler']['path'] ?? '',
-                            (int) ($ep['handler']['line'] ?? 0),
+                        self::formatEntryPointCell(
+                            self::formatName($entryPoint['extra'] ?? null, $entryPoint['name'] ?? '?'),
+                            $entryPoint['handler']['fqn'] ?? '?',
+                            $entryPoint['handler']['path'] ?? '',
+                            (int) ($entryPoint['handler']['line'] ?? 0),
                             $reachPath,
                         ),
                     ];
                 }
                 $lines[] = sprintf('#### %s `%s` — %d', self::kindIcon($kind), $kind, count($entries));
                 $lines[] = '';
-                self::appendGfmTable($lines, ['reach', 'affected by changed', 'name', 'handler'], $rows);
+                self::appendGfmTable($lines, ['reach', 'affected by changed', 'entry point'], $rows);
                 $lines[] = '';
             }
         }
@@ -360,7 +365,7 @@ final class Renderer
     /**
      * Append a GitHub-flavoured-markdown table. GFM doesn't allow literal
      * `|` or newlines inside cells, so callers MUST encode line breaks as
-     * `<br>` and pre-escape pipes — `formatHandlerCell` does both.
+     * `<br>` and pre-escape pipes — `formatEntryPointCell` does both.
      *
      * @param-out list<string>      $lines
      * @param list<string>          $headers
@@ -452,29 +457,28 @@ final class Renderer
         return $fallback;
     }
 
-    private static function formatHandler(string $fqn, string $path, int $line): string
-    {
-        if ($path === '') {
-            return $fqn;
-        }
-        return sprintf('%s (%s:%d)', $fqn, $path, $line);
-    }
 
     /**
-     * Render the handler cell for a GFM table row. Direct hits show just
-     * `FQN (path:line)`. Transitive hits append a collapsed `<details>`
-     * block whose summary is "↳ N hops" and whose body is an arrow-joined
-     * list of file paths from the handler to the changed file. Lets a
-     * reviewer scan the table at width and expand only the rows where the
-     * call chain actually matters.
+     * Render the combined "entry point" cell — name on the first line,
+     * handler FQN on the second, file:line on the third. Indirect hits
+     * tack on a collapsible `↳ N hops` chain so the row stays scannable
+     * at table width but the call chain is one click away.
      *
      * @param list<string>|null $reachPath
      */
-    private static function formatHandlerCell(string $fqn, string $path, int $line, ?array $reachPath): string
+    private static function formatEntryPointCell(string $name, string $fqn, string $path, int $line, ?array $reachPath): string
     {
-        $head = self::formatHandler($fqn, $path, $line);
+        $lines = [
+            '<strong>' . $name . '</strong>',
+            '<code>' . $fqn . '</code>',
+        ];
+        if ($path !== '') {
+            $lines[] = '<sub>' . $path . ($line > 0 ? ':' . $line : '') . '</sub>';
+        }
+        $cell = implode('<br>', $lines);
+
         if ($reachPath === null || $reachPath === []) {
-            return $head;
+            return $cell;
         }
         $hops  = count($reachPath);
         $chain = '<code>' . $path . '</code>';
@@ -483,7 +487,7 @@ final class Renderer
         }
         return sprintf(
             '%s<br><details><summary>↳ %d hop%s</summary>%s</details>',
-            $head,
+            $cell,
             $hops,
             $hops === 1 ? '' : 's',
             $chain,
@@ -494,14 +498,14 @@ final class Renderer
     private static function renderAnalysisText(string $name, array $result, array &$lines): void
     {
         if ($name === 'list-entrypoints') {
-            $eps = $result['entry_points'] ?? [];
-            $lines[] = sprintf('  %d entry point(s):', count($eps));
-            foreach ($eps as $ep) {
+            $entryPoints = $result['entry_points'] ?? [];
+            $lines[] = sprintf('  %d entry point(s):', count($entryPoints));
+            foreach ($entryPoints as $entryPoint) {
                 $lines[] = sprintf(
                     '    - %-24s %-30s %s',
-                    $ep['kind'] ?? '?',
-                    $ep['name'] ?? '?',
-                    $ep['handler_fqn'] ?? '?',
+                    $entryPoint['kind'] ?? '?',
+                    $entryPoint['name'] ?? '?',
+                    $entryPoint['handler_fqn'] ?? '?',
                 );
             }
 
@@ -523,13 +527,13 @@ final class Renderer
             }
             foreach (self::groupByKind($affected) as $kind => $entries) {
                 $lines[] = sprintf('  %s (%d):', $kind, count($entries));
-                foreach ($entries as $ep) {
-                    $lines[] = sprintf('    - %s', $ep['name'] ?? '?');
+                foreach ($entries as $entryPoint) {
+                    $lines[] = sprintf('    - %s', $entryPoint['name'] ?? '?');
                     $lines[] = sprintf(
                         '        handler: %s (%s:%d)',
-                        $ep['handler']['fqn'] ?? '?',
-                        $ep['handler']['path'] ?? '?',
-                        $ep['handler']['line'] ?? 0,
+                        $entryPoint['handler']['fqn'] ?? '?',
+                        $entryPoint['handler']['path'] ?? '?',
+                        $entryPoint['handler']['line'] ?? 0,
                     );
                 }
             }
@@ -558,9 +562,9 @@ final class Renderer
             'phpunit.test',
         ];
         $buckets = [];
-        foreach ($entries as $ep) {
-            $kind = $ep['kind'] ?? '?';
-            $buckets[$kind][] = $ep;
+        foreach ($entries as $entryPoint) {
+            $kind = $entryPoint['kind'] ?? '?';
+            $buckets[$kind][] = $entryPoint;
         }
         foreach ($buckets as &$list) {
             usort($list, static fn (array $a, array $b): int => strcmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? '')));
