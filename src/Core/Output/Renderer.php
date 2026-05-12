@@ -38,7 +38,7 @@ final class Renderer
     {
         $serialised = json_decode(json_encode($envelope), true);
         $lines = [];
-        $lines[] = sprintf('# watson — %s %s', $serialised['language'], $serialised['framework']);
+        $lines[] = sprintf('# watson — %s', $serialised['language']);
         $lines[] = '';
         $lines[] = sprintf('_tool %s v%s_', $serialised['tool'], $serialised['version']);
         $lines[] = '';
@@ -49,6 +49,8 @@ final class Renderer
         }
         $lines[] = sprintf('Root: `%s`', $serialised['context']['root']);
         $lines[] = '';
+
+        self::appendSourcesPanel($serialised['sources'] ?? [], $lines);
 
         foreach ($serialised['analyses'] as $analysis) {
             $lines[] = sprintf('## %s', $analysis['name']);
@@ -69,7 +71,7 @@ final class Renderer
     private static function text(Envelope $envelope): string
     {
         $serialised = json_decode(json_encode($envelope), true);
-        $header = sprintf('watson %s %s (root: %s)', $serialised['language'], $serialised['framework'], $serialised['context']['root']);
+        $header = sprintf('watson %s (root: %s)', $serialised['language'], $serialised['context']['root']);
         $bar = str_repeat('=', min(80, strlen($header)));
         $lines = [$bar, $header];
         $base = $serialised['context']['base'] ?? null;
@@ -102,11 +104,15 @@ final class Renderer
      * prompts where every token costs money. Header lines start with `#`
      * so the LLM (or `awk`) can split header from body trivially.
      *
-     *   # watson <ver> <analysis> <lang>/<framework> root=<root> [base=…] [head=…]
+     *   # watson <ver> <analysis> <lang> root=<root> [base=…] [head=…]
      *   # entrypoints=N           (or files=N affected=N for blastradius)
      *   # kinds: <code>=<full> …  (legend, only kinds present in body)
      *   # fields: kind name handler path:line extra
      *   <kind>\t<name>\t<handler_fqn>\t<rel/path:line>\t<extra>
+     *
+     * The source-discovery report (`Envelope::sources()`) is
+     * deliberately omitted from tok output — it bloats token cost for
+     * no LLM benefit. JSON + markdown carry it instead.
      */
     private static function tok(Envelope $envelope): string
     {
@@ -114,7 +120,6 @@ final class Renderer
         $tool = (string) ($serialised['tool'] ?? 'watson');
         $version = (string) ($serialised['version'] ?? '');
         $lang = (string) ($serialised['language'] ?? '');
-        $framework = (string) ($serialised['framework'] ?? '');
         $root = (string) ($serialised['context']['root'] ?? '');
         $baseRev = $serialised['context']['base'] ?? null;
         $headRev = $serialised['context']['head'] ?? null;
@@ -122,7 +127,7 @@ final class Renderer
         $lines = [];
         foreach ($serialised['analyses'] as $analysis) {
             $name = (string) ($analysis['name'] ?? '?');
-            $head = sprintf('# %s %s %s %s/%s root=%s', $tool, $version, $name, $lang, $framework, $root);
+            $head = sprintf('# %s %s %s %s root=%s', $tool, $version, $name, $lang, $root);
             if ($baseRev !== null && $headRev !== null) {
                 $head .= sprintf(' base=%s head=%s', self::short((string) $baseRev), self::short((string) $headRev));
             }
@@ -429,6 +434,46 @@ final class Renderer
         // Newlines are allowed only as `<br>`.
         $cell = str_replace(["\r\n", "\n", "\r"], '<br>', $cell);
         return str_replace('|', '\\|', $cell);
+    }
+
+    /**
+     * Render the per-run source discovery report inside a collapsed
+     * `<details>` block.
+     *
+     * @param list<array<string,mixed>> $sources
+     * @param-out list<string>          $lines
+     */
+    private static function appendSourcesPanel(array $sources, array &$lines): void
+    {
+        if ($sources === []) {
+            return;
+        }
+        $rows = [];
+        foreach ($sources as $source) {
+            $rows[] = [
+                self::statusBadge((string) ($source['status'] ?? '')),
+                '<code>' . ($source['name'] ?? '?') . '</code>',
+                (string) ($source['count'] ?? 0),
+                $source['error'] !== null && $source['error'] !== '' ? '`' . $source['error'] . '`' : '',
+            ];
+        }
+        $ran = count(array_filter($sources, static fn (array $s): bool => ($s['status'] ?? '') === 'ran'));
+        self::appendCollapsibleGroup(
+            $lines,
+            sprintf('🔍 sources — %d/%d ran', $ran, count($sources)),
+            ['status', 'source', 'count', 'error'],
+            $rows,
+        );
+    }
+
+    private static function statusBadge(string $status): string
+    {
+        return match ($status) {
+            'ran'     => '✅ ran',
+            'skipped' => '⏭ skipped',
+            'failed'  => '❌ failed',
+            default   => '·',
+        };
     }
 
     private static function reachLegend(): string

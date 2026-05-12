@@ -93,7 +93,7 @@ final class RendererTest extends TestCase
 
     public function testMarkdownAffectedByChangedShowsTriggerSymbols(): void
     {
-        $envelope = new Envelope(language: 'php', framework: 'symfony', rootPath: '/x', base: 'main', head: 'HEAD');
+        $envelope = new Envelope(language: 'php', rootPath: '/x', base: 'main', head: 'HEAD');
         $envelope->pushAnalysis('blastradius', '0.4.0', [
             'summary' => ['files_changed' => 1, 'symbols_changed' => 1, 'entry_points_affected' => 1],
             'affected_entry_points' => [
@@ -133,7 +133,7 @@ final class RendererTest extends TestCase
 
     private static function sampleListEnvelope(): Envelope
     {
-        $envelope = new Envelope(language: 'php', framework: 'symfony', rootPath: '/x');
+        $envelope = new Envelope(language: 'php', rootPath: '/x');
         $envelope->pushAnalysis('list-entrypoints', '0.2.0', [
             'entry_points' => [
                 ['kind' => 'symfony.route', 'name' => 'name', 'handler_fqn' => 'X::y', 'handler_path' => '/abs/X.php', 'handler_line' => 12, 'source' => 'runtime', 'extra' => ['path' => '/', 'methods' => ['GET']]],
@@ -153,7 +153,7 @@ final class RendererTest extends TestCase
     private static function withConfidence(Envelope $envelope, array $confidences): Envelope
     {
         $analyses = $envelope->jsonSerialize()['analyses'] ?? [];
-        $rebuilt = new Envelope(language: 'php', framework: 'symfony', rootPath: '/x', base: 'main', head: 'HEAD');
+        $rebuilt = new Envelope(language: 'php', rootPath: '/x', base: 'main', head: 'HEAD');
         foreach ($analyses as $a) {
             if (($a['name'] ?? '') === 'blastradius') {
                 $entryPoints = $a['result']['affected_entry_points'] ?? [];
@@ -170,7 +170,7 @@ final class RendererTest extends TestCase
 
     private static function sampleBlastradiusEnvelope(): Envelope
     {
-        $envelope = new Envelope(language: 'php', framework: 'symfony', rootPath: '/x', base: 'main', head: 'HEAD');
+        $envelope = new Envelope(language: 'php', rootPath: '/x', base: 'main', head: 'HEAD');
         $envelope->pushAnalysis('blastradius', '0.2.0', [
             'summary' => ['files_changed' => 2, 'entry_points_affected' => 2],
             'affected_entry_points' => [

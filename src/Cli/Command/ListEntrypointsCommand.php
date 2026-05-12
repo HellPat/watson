@@ -9,8 +9,9 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
-use Watson\Cli\EntrypointResolver;
+use Watson\Cli\ChainedEntrypointResolver;
 use Watson\Cli\ProjectDetector;
+use Watson\Cli\ResolverOptions;
 use Watson\Core\Output\Envelope;
 use Watson\Core\Output\Renderer;
 
@@ -33,10 +34,14 @@ final class ListEntrypointsCommand extends Command
         $startDir = (string) ($input->getOption('project') ?? (getcwd() ?: '.'));
         $project = ProjectDetector::detect($startDir);
 
-        $entryPoints = EntrypointResolver::collect($project, [
-            'scope' => (string) $input->getOption('scope'),
-            'app_env' => (string) $input->getOption('app-env'),
-        ]);
+        $chained = ChainedEntrypointResolver::default()->collect(
+            $project,
+            new ResolverOptions(
+                scope: (string) $input->getOption('scope'),
+                appEnv: (string) $input->getOption('app-env'),
+            ),
+        );
+        $entryPoints = $chained['entryPoints'];
 
         if ($output->isVerbose()) {
             $output->writeln(sprintf(
@@ -48,9 +53,9 @@ final class ListEntrypointsCommand extends Command
 
         $envelope = new Envelope(
             language: 'php',
-            framework: $project->framework->value,
             rootPath: $project->rootPath,
         );
+        $envelope->setSources($chained['sourceReport']);
         $envelope->pushAnalysis('list-entrypoints', Envelope::TOOL_VERSION, [
             'entry_points' => $entryPoints,
         ]);

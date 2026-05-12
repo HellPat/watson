@@ -10,8 +10,9 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Composer\Autoload\ClassLoader;
-use Watson\Cli\EntrypointResolver;
+use Watson\Cli\ChainedEntrypointResolver;
 use Watson\Cli\ProjectDetector;
+use Watson\Cli\ResolverOptions;
 use Watson\Core\Analysis\Blastradius;
 use Watson\Core\Diff\ChangedFilesReader;
 use Watson\Core\Output\Envelope;
@@ -64,16 +65,20 @@ final class BlastradiusCommand extends Command
         $head = $input->getOption('head');
         $envelope = new Envelope(
             language: 'php',
-            framework: $project->framework->value,
             rootPath: $project->rootPath,
             base: is_string($base) && $base !== '' ? $base : null,
             head: is_string($head) && $head !== '' ? $head : null,
         );
 
-        $entryPoints = EntrypointResolver::collect($project, [
-            'scope' => (string) $input->getOption('scope'),
-            'app_env' => (string) $input->getOption('app-env'),
-        ]);
+        $chained = ChainedEntrypointResolver::default()->collect(
+            $project,
+            new ResolverOptions(
+                scope: (string) $input->getOption('scope'),
+                appEnv: (string) $input->getOption('app-env'),
+            ),
+        );
+        $entryPoints = $chained['entryPoints'];
+        $envelope->setSources($chained['sourceReport']);
 
         if ($output->isVerbose()) {
             $output->writeln(sprintf(

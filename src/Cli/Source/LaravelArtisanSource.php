@@ -29,7 +29,7 @@ final class LaravelArtisanSource
     public function routes(): array
     {
         $proc = new Process(
-            ['php', '-d', 'display_errors=stderr', $this->project->consoleScript, 'route:list', '--json', '--env=' . $this->appEnv],
+            ['php', '-d', 'display_errors=stderr', $this->project->rootPath . "/artisan", 'route:list', '--json', '--env=' . $this->appEnv],
             $this->project->rootPath,
         );
         $proc->mustRun();

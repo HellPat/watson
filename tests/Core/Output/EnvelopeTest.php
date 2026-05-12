@@ -11,14 +11,15 @@ final class EnvelopeTest extends TestCase
 {
     public function testJsonShapeMatchesSchema(): void
     {
-        $envelope = new Envelope(language: 'php', framework: 'symfony', rootPath: '/x', base: 'main', head: 'HEAD');
+        $envelope = new Envelope(language: 'php', rootPath: '/x', base: 'main', head: 'HEAD');
         $envelope->pushAnalysis('list-entrypoints', '0.2.0', ['entry_points' => []]);
 
         $payload = json_decode(json_encode($envelope), true);
 
         $this->assertSame('watson', $payload['tool']);
         $this->assertSame('php', $payload['language']);
-        $this->assertSame('symfony', $payload['framework']);
+        $this->assertArrayNotHasKey('framework', $payload);
+        $this->assertSame([], $payload['sources']);
         $this->assertSame(['root' => '/x', 'base' => 'main', 'head' => 'HEAD'], $payload['context']);
         $this->assertCount(1, $payload['analyses']);
         $this->assertTrue($payload['analyses'][0]['ok']);
@@ -27,7 +28,7 @@ final class EnvelopeTest extends TestCase
 
     public function testFailedAnalysisDropsResult(): void
     {
-        $envelope = new Envelope(language: 'php', framework: 'laravel', rootPath: '/x');
+        $envelope = new Envelope(language: 'php', rootPath: '/x');
         $envelope->pushFailedAnalysis('blastradius', '0.2.0', 'git failed', 'git-error');
 
         $payload = json_decode(json_encode($envelope), true);
@@ -39,7 +40,7 @@ final class EnvelopeTest extends TestCase
 
     public function testContextOmitsBaseAndHeadWhenNull(): void
     {
-        $envelope = new Envelope(language: 'php', framework: 'symfony', rootPath: '/x');
+        $envelope = new Envelope(language: 'php', rootPath: '/x');
         $payload = json_decode(json_encode($envelope), true);
         $this->assertSame(['root' => '/x'], $payload['context']);
     }
