@@ -42,9 +42,9 @@ final class RendererTest extends TestCase
         $out = Renderer::render(Renderer::FORMAT_MD, $envelope);
 
         // GFM table headers (pipe-delimited).
-        $this->assertStringContainsString('| reach | affected by changed | entry point |', $out);
+        $this->assertStringContainsString('| reach | entry point | cause | path |', $out);
         // GFM separator row.
-        $this->assertStringContainsString('|---|---|---|', $out);
+        $this->assertStringContainsString('|---|---|---|---|', $out);
         // Kind icons next to the kind label.
         $this->assertStringContainsString('🛣️', $out);
         $this->assertStringContainsString('⌨️', $out);
@@ -111,7 +111,7 @@ final class RendererTest extends TestCase
         ]);
         $out = Renderer::render(Renderer::FORMAT_MD, $envelope);
 
-        $this->assertStringContainsString('| reach | affected by changed | entry point |', $out);
+        $this->assertStringContainsString('| reach | entry point | cause | path |', $out);
         $this->assertStringContainsString('App\\Service\\ProductService::userRankedPluNumbers', $out);
         $this->assertStringContainsString('🔗 indirect', $out);
     }

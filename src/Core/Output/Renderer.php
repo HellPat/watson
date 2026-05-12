@@ -193,6 +193,7 @@ final class Renderer
         $twig->addFunction(new TwigFunction('format_name', [self::class, 'formatName']));
         $twig->addFunction(new TwigFunction('format_triggers', [self::class, 'formatTriggers']));
         $twig->addFunction(new TwigFunction('format_entry_point_cell', [self::class, 'formatEntryPointCell']));
+        $twig->addFunction(new TwigFunction('format_call_path', [self::class, 'formatCallPath']));
         $twig->addFunction(new TwigFunction('tok_row', [self::class, 'tokRow']));
         $twig->addFunction(new TwigFunction('repeat', static fn (string $char, int $n): string => str_repeat($char, max(0, $n))));
     }
@@ -295,13 +296,11 @@ final class Renderer
     }
 
     /**
-     * Combined "entry point" cell: name + handler FQN + file:line on
-     * separate visual lines, with an optional collapsible call chain
-     * appended for indirect hits.
-     *
-     * @param list<string>|null $reachPath
+     * "entry point" cell: name + handler FQN + file:line on separate
+     * visual lines. Call-chain rendering lives in {@see formatCallPath}
+     * so the table can show it in its own column.
      */
-    public static function formatEntryPointCell(string $name, string $fqn, string $path, int $line, ?array $reachPath = null): string
+    public static function formatEntryPointCell(string $name, string $fqn, string $path, int $line): string
     {
         $lines = [
             '<strong>' . $name . '</strong>',
@@ -310,19 +309,29 @@ final class Renderer
         if ($path !== '') {
             $lines[] = '<sub>' . $path . ($line > 0 ? ':' . $line : '') . '</sub>';
         }
-        $cell = implode('<br>', $lines);
+        return implode('<br>', $lines);
+    }
 
+    /**
+     * "path" cell: collapsible call chain from the entry-point handler
+     * file down to the changed symbol. Direct hits render as a dash —
+     * the entry point's own handler file is in the diff, no traversal
+     * happened.
+     *
+     * @param list<string>|null $reachPath
+     */
+    public static function formatCallPath(?array $reachPath, string $handlerPath): string
+    {
         if ($reachPath === null || $reachPath === []) {
-            return $cell;
+            return '🎯 direct';
         }
         $hops  = count($reachPath);
-        $chain = '<code>' . $path . '</code>';
+        $chain = '<code>' . $handlerPath . '</code>';
         foreach ($reachPath as $step) {
             $chain .= '<br>↳ <code>' . $step . '</code>';
         }
         return sprintf(
-            '%s<br><details><summary>↳ %d hop%s</summary>%s</details>',
-            $cell,
+            '<details><summary>↳ %d hop%s</summary>%s</details>',
             $hops,
             $hops === 1 ? '' : 's',
             $chain,

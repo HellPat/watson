@@ -8,10 +8,10 @@ _💤 nothing reached. Diff did not touch any registered entry point or its dire
 <details>
 <summary>{{ kind_icon(kind) }} `{{ kind }}` — {{ entries|length }}</summary>
 
-| reach | affected by changed | entry point |
-|---|---|---|
+| reach | entry point | cause | path |
+|---|---|---|---|
 {% for entry in entries -%}
-| {{ reach_badge(entry.min_confidence|default(null))|escape_gfm }} | {{ format_triggers(entry.triggered_by|default([]))|escape_gfm }} | {{ format_entry_point_cell(format_name(entry.extra|default(null), entry.name|default('?')), entry.handler.fqn|default('?'), entry.handler.path|default(''), entry.handler.line|default(0), entry.reach_path|default(null))|escape_gfm }} |
+| {{ reach_badge(entry.min_confidence|default(null))|escape_gfm }} | {{ format_entry_point_cell(format_name(entry.extra|default(null), entry.name|default('?')), entry.handler.fqn|default('?'), entry.handler.path|default(''), entry.handler.line|default(0))|escape_gfm }} | {{ format_triggers(entry.triggered_by|default([]))|escape_gfm }} | {{ format_call_path(entry.reach_path|default(null), entry.handler.path|default(''))|escape_gfm }} |
 {% endfor %}
 </details>
 
