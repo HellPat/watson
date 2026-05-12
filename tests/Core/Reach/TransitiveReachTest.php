@@ -18,10 +18,7 @@ final class TransitiveReachTest extends TestCase
     protected function setUp(): void
     {
         $this->project = sys_get_temp_dir() . '/watson_transitive_' . uniqid();
-        mkdir($this->project . '/app/Jobs', 0700, true);
-        mkdir($this->project . '/app/Service', 0700, true);
         mkdir($this->project . '/vendor/composer', 0700, true);
-
         file_put_contents($this->project . '/composer.json', (string) json_encode([
             'name'     => 'acme/app',
             'autoload' => ['psr-4' => ['App\\' => 'app/']],
@@ -36,183 +33,90 @@ final class TransitiveReachTest extends TestCase
 
     public function testReportsEntryPointWhenTransitivelyReferencedClassFileChanges(): void
     {
-        $service = $this->project . '/app/Service/MyService.php';
-        $job     = $this->project . '/app/Jobs/MyJob.php';
-        file_put_contents($service, '<?php namespace App\Service; class MyService { public function run(): void {} }');
-        file_put_contents($job, '<?php
-            namespace App\Jobs;
-
+        $service = $this->writeClass('App\\Service\\MyService', 'class MyService { public function run(): void {} }');
+        $job     = $this->writeClass('App\\Jobs\\MyJob', '
             use App\Service\MyService;
-
             class MyJob {
-                public function handle(): void {
-                    (new MyService())->run();
-                }
-            }
-        ');
+                public function handle(): void { (new MyService())->run(); }
+            }');
 
-        $reflector = $this->makeLoader();
-        $entryPoints       = [$this->ep('App\\Jobs\\MyJob', $job)];
-
-        $hits = TransitiveReach::affectedIndices($entryPoints, [self::cs($service)], $reflector, $this->project);
-
-        self::assertSame([0], array_keys($hits));
+        $this->assertReaches('App\\Jobs\\MyJob', $job, self::cs($service));
     }
 
     public function testIgnoresEntryPointWhenNoTransitiveOverlapWithDiff(): void
     {
-        $service = $this->project . '/app/Service/MyService.php';
-        $other   = $this->project . '/app/Service/Unrelated.php';
-        $job     = $this->project . '/app/Jobs/MyJob.php';
-        file_put_contents($service, '<?php namespace App\Service; class MyService {}');
-        file_put_contents($other, '<?php namespace App\Service; class Unrelated {}');
-        file_put_contents($job, '<?php
-            namespace App\Jobs;
-
+        $this->writeClass('App\\Service\\MyService', 'class MyService {}');
+        $other = $this->writeClass('App\\Service\\Unrelated', 'class Unrelated {}');
+        $job   = $this->writeClass('App\\Jobs\\MyJob', '
             use App\Service\MyService;
-
             class MyJob {
-                public function handle(): void {
-                    (new MyService())->run();
-                }
-            }
-        ');
+                public function handle(): void { (new MyService())->run(); }
+            }');
 
-        $reflector = $this->makeLoader();
-        $entryPoints       = [$this->ep('App\\Jobs\\MyJob', $job)];
-
-        $hits = TransitiveReach::affectedIndices($entryPoints, [self::cs($other)], $reflector, $this->project);
-
-        self::assertSame([], $hits);
+        $this->assertDoesNotReach('App\\Jobs\\MyJob', $job, self::cs($other));
     }
 
     public function testFollowsClassConstAsClassReference(): void
     {
         // `Foo::class` should still drag Foo into the closure (covers the
         // `app(Foo::class)` / DI-container pattern).
-        $service = $this->project . '/app/Service/MyService.php';
-        $job     = $this->project . '/app/Jobs/MyJob.php';
-        file_put_contents($service, '<?php namespace App\Service; class MyService {}');
-        file_put_contents($job, '<?php
-            namespace App\Jobs;
-
+        $service = $this->writeClass('App\\Service\\MyService', 'class MyService {}');
+        $job     = $this->writeClass('App\\Jobs\\MyJob', '
             use App\Service\MyService;
-
             class MyJob {
-                public function handle(): void {
-                    $fqn = MyService::class;
-                }
-            }
-        ');
+                public function handle(): void { $fqn = MyService::class; }
+            }');
 
-        $reflector = $this->makeLoader();
-        $entryPoints       = [$this->ep('App\\Jobs\\MyJob', $job)];
-
-        $hits = TransitiveReach::affectedIndices($entryPoints, [self::cs($service)], $reflector, $this->project);
-
-        self::assertSame([0], array_keys($hits));
+        $this->assertReaches('App\\Jobs\\MyJob', $job, self::cs($service));
     }
 
     public function testFollowsTypeHintInMethodSignature(): void
     {
-        $service = $this->project . '/app/Service/MyService.php';
-        $job     = $this->project . '/app/Jobs/MyJob.php';
-        file_put_contents($service, '<?php namespace App\Service; class MyService {}');
-        file_put_contents($job, '<?php
-            namespace App\Jobs;
-
+        $service = $this->writeClass('App\\Service\\MyService', 'class MyService {}');
+        $job     = $this->writeClass('App\\Jobs\\MyJob', '
             use App\Service\MyService;
-
             class MyJob {
                 public function handle(MyService $svc): void {}
-            }
-        ');
+            }');
 
-        $reflector = $this->makeLoader();
-        $entryPoints       = [$this->ep('App\\Jobs\\MyJob', $job)];
-
-        $hits = TransitiveReach::affectedIndices($entryPoints, [self::cs($service)], $reflector, $this->project);
-
-        self::assertSame([0], array_keys($hits));
+        $this->assertReaches('App\\Jobs\\MyJob', $job, self::cs($service));
     }
 
     public function testFollowsTransitiveChainTwoHopsDeep(): void
     {
-        // Job → Service → DataMapper
-        $mapper  = $this->project . '/app/Service/DataMapper.php';
-        $service = $this->project . '/app/Service/MyService.php';
-        $job     = $this->project . '/app/Jobs/MyJob.php';
-        file_put_contents($mapper, '<?php namespace App\Service; class DataMapper {}');
-        file_put_contents($service, '<?php
-            namespace App\Service;
-            class MyService {
-                public function run(): void { (new DataMapper()); }
-            }
-        ');
-        file_put_contents($job, '<?php
-            namespace App\Jobs;
+        $mapper = $this->writeClass('App\\Service\\DataMapper', 'class DataMapper {}');
+        $this->writeClass('App\\Service\\MyService', '
+            class MyService { public function run(): void { (new DataMapper()); } }');
+        $job = $this->writeClass('App\\Jobs\\MyJob', '
             use App\Service\MyService;
             class MyJob {
                 public function handle(): void { (new MyService())->run(); }
-            }
-        ');
+            }');
 
-        $reflector = $this->makeLoader();
-        $entryPoints       = [$this->ep('App\\Jobs\\MyJob', $job)];
-
-        $hits = TransitiveReach::affectedIndices($entryPoints, [self::cs($mapper)], $reflector, $this->project);
-
-        self::assertSame([0], array_keys($hits));
+        $this->assertReaches('App\\Jobs\\MyJob', $job, self::cs($mapper));
     }
 
     public function testMaxDepthTruncatesDeeperChain(): void
     {
-        // Three-hop chain: Job → Outer → Inner → Service → DataMapper.
-        //   - maxDepth=1: reaches Inner (1 hop from Service); Outer at
-        //     hop 2 and Job at hop 3 are truncated.
-        //   - maxDepth=0: unbounded — Job is reached.
-        // Service is the propagate-seeded depth-0 node (class-level edge
-        // to DataMapper::* via `new DataMapper()`).
-        $mapper  = $this->project . '/app/Service/DataMapper.php';
-        $service = $this->project . '/app/Service/MyService.php';
-        $inner   = $this->project . '/app/Service/Inner.php';
-        $outer   = $this->project . '/app/Service/Outer.php';
-        $job     = $this->project . '/app/Jobs/MyJob.php';
-        file_put_contents($mapper, '<?php namespace App\Service; class DataMapper {}');
-        file_put_contents($service, '<?php
-            namespace App\Service;
-            class MyService {
-                public function run(): void { (new DataMapper()); }
-            }
-        ');
-        file_put_contents($inner, '<?php
-            namespace App\Service;
-            class Inner {
-                public function step(): void { (new MyService())->run(); }
-            }
-        ');
-        file_put_contents($outer, '<?php
-            namespace App\Service;
-            class Outer {
-                public function step(): void { (new Inner())->step(); }
-            }
-        ');
-        file_put_contents($job, '<?php
-            namespace App\Jobs;
+        // Chain: Job → Outer → Inner → Service → DataMapper.
+        //   - maxDepth=1: BFS reaches Inner (1 hop from Service);
+        //     Outer at hop 2 and Job at hop 3 are truncated.
+        //   - maxDepth=0: unbounded (the new default) — Job is reached.
+        $mapper = $this->writeClass('App\\Service\\DataMapper', 'class DataMapper {}');
+        $this->writeClass('App\\Service\\MyService', '
+            class MyService { public function run(): void { (new DataMapper()); } }');
+        $this->writeClass('App\\Service\\Inner', '
+            class Inner { public function step(): void { (new MyService())->run(); } }');
+        $this->writeClass('App\\Service\\Outer', '
+            class Outer { public function step(): void { (new Inner())->step(); } }');
+        $job = $this->writeClass('App\\Jobs\\MyJob', '
             use App\Service\Outer;
             class MyJob {
                 public function handle(): void { (new Outer())->step(); }
-            }
-        ');
+            }');
 
-        $reflector   = $this->makeLoader();
-        $entryPoints = [$this->ep('App\\Jobs\\MyJob', $job)];
-
-        $tight = TransitiveReach::affectedIndices($entryPoints, [self::cs($mapper)], $reflector, $this->project, 5000, 1);
-        self::assertSame([], $tight, 'depth=1 must not reach the entry point 3 hops away');
-
-        $unbounded = TransitiveReach::affectedIndices($entryPoints, [self::cs($mapper)], $reflector, $this->project, 5000, 0);
-        self::assertSame([0], array_keys($unbounded), 'depth=0 (unbounded, the new default) must reach the entry point');
+        $this->assertDoesNotReach('App\\Jobs\\MyJob', $job, self::cs($mapper), maxDepth: 1);
+        $this->assertReaches('App\\Jobs\\MyJob', $job, self::cs($mapper), maxDepth: 0);
     }
 
     public function testIgnoresUnusedImports(): void
@@ -220,157 +124,82 @@ final class TransitiveReachTest extends TestCase
         // Importing a class without using it must NOT pull it into the
         // closure — otherwise watson reports every route whose controller
         // imports a model it never actually instantiates.
-        $service = $this->project . '/app/Service/MyService.php';
-        $other   = $this->project . '/app/Service/Unused.php';
-        $job     = $this->project . '/app/Jobs/MyJob.php';
-        file_put_contents($service, '<?php namespace App\Service; class MyService {}');
-        file_put_contents($other, '<?php namespace App\Service; class Unused {}');
-        file_put_contents($job, '<?php
-            namespace App\Jobs;
-
+        $service = $this->writeClass('App\\Service\\MyService', 'class MyService {}');
+        $other   = $this->writeClass('App\\Service\\Unused', 'class Unused {}');
+        $job     = $this->writeClass('App\\Jobs\\MyJob', '
             use App\Service\MyService;
             use App\Service\Unused;
-
             class MyJob {
-                public function handle(): void {
-                    new MyService();
-                }
-            }
-        ');
+                public function handle(): void { new MyService(); }
+            }');
 
-        $reflector = $this->makeLoader();
-        $entryPoints       = [$this->ep('App\\Jobs\\MyJob', $job)];
-
-        // A change in the Unused class must not flag the job — only
-        // a change in MyService should.
-        self::assertSame([], array_keys(TransitiveReach::affectedIndices($entryPoints, [self::cs($other)], $reflector, $this->project)));
-        self::assertSame([0], array_keys(TransitiveReach::affectedIndices($entryPoints, [self::cs($service)], $reflector, $this->project)));
+        $this->assertDoesNotReach('App\\Jobs\\MyJob', $job, self::cs($other));
+        $this->assertReaches('App\\Jobs\\MyJob', $job, self::cs($service));
     }
 
     public function testMethodLevelPrecisionFlagsCallerThatUsesChangedMethod(): void
     {
-        $service = $this->project . '/app/Service/MyService.php';
-        $job     = $this->project . '/app/Jobs/MyJob.php';
-        file_put_contents($service, '<?php
-            namespace App\Service;
+        $service = $this->writeClass('App\\Service\\MyService', '
             class MyService {
                 public function a(): void {}
                 public function b(): void {}
             }');
-        file_put_contents($job, '<?php
-            namespace App\Jobs;
+        $job = $this->writeClass('App\\Jobs\\MyJob', '
             use App\Service\MyService;
             class MyJob {
-                public function handle(MyService $svc): void {
-                    $svc->a();
-                }
+                public function handle(MyService $svc): void { $svc->a(); }
             }');
 
-        $reflector = $this->makeLoader();
-        $entryPoints       = [$this->ep('App\\Jobs\\MyJob', $job)];
-
-        // Change MyService::a → MyJob is flagged.
-        $hits = TransitiveReach::affectedIndices(
-            $entryPoints,
-            [new ChangedSymbol($service, 'App\\Service\\MyService', 'a', 1, 1)],
-            $reflector,
-            $this->project,
-        );
-        self::assertSame([0], array_keys($hits));
+        $this->assertReaches('App\\Jobs\\MyJob', $job, new ChangedSymbol($service, 'App\\Service\\MyService', 'a', 1, 1));
     }
 
     public function testMethodLevelPrecisionIgnoresCallerThatDoesNotUseChangedMethod(): void
     {
-        $service = $this->project . '/app/Service/MyService.php';
-        $job     = $this->project . '/app/Jobs/MyJob.php';
-        file_put_contents($service, '<?php
-            namespace App\Service;
+        // MyJob calls only ::a — change to ::b *would* otherwise be a
+        // miss, but the typed param `MyService $svc` couples the handler
+        // signature to the whole class via a ClassLevel edge, which
+        // matches any change inside MyService. This is the intentional
+        // signature-coupling behaviour; see the next test for the
+        // genuine "no coupling at all" case.
+        $service = $this->writeClass('App\\Service\\MyService', '
             class MyService {
                 public function a(): void {}
                 public function b(): void {}
             }');
-        // MyJob calls only ::a — change to ::b must NOT flag MyJob.
-        file_put_contents($job, '<?php
-            namespace App\Jobs;
+        $job = $this->writeClass('App\\Jobs\\MyJob', '
             class MyJob {
-                public function handle(\App\Service\MyService $svc): void {
-                    $svc->a();
-                }
+                public function handle(\App\Service\MyService $svc): void { $svc->a(); }
             }');
 
-        $reflector = $this->makeLoader();
-        $entryPoints       = [$this->ep('App\\Jobs\\MyJob', $job)];
-
-        $hits = TransitiveReach::affectedIndices(
-            $entryPoints,
-            [new ChangedSymbol($service, 'App\\Service\\MyService', 'b', 1, 1)],
-            $reflector,
-            $this->project,
-        );
-        // The handle method has a typed param MyService → ClassLevel
-        // coupling to the whole class. ClassLevel matches any change in
-        // the class, so MyService::b *will* still flag MyJob via the
-        // signature. This is intentional: the signature alone couples
-        // the handler to the class. Document via the next test.
-        self::assertSame([0], array_keys($hits));
+        $this->assertReaches('App\\Jobs\\MyJob', $job, new ChangedSymbol($service, 'App\\Service\\MyService', 'b', 1, 1));
     }
 
     public function testMethodLevelPrecisionIgnoresCallerWithoutClassLevelCoupling(): void
     {
-        $service = $this->project . '/app/Service/MyService.php';
-        $other   = $this->project . '/app/Service/Other.php';
-        $job     = $this->project . '/app/Jobs/MyJob.php';
-        file_put_contents($service, '<?php
-            namespace App\Service;
-            class MyService {
-                public function a(): void {}
-                public function b(): void {}
-            }');
-        file_put_contents($other, '<?php
-            namespace App\Service;
-            class Other {
-                public function go(): void {}
-            }');
         // MyJob neither uses MyService nor type-hints it — no edge at all.
-        file_put_contents($job, '<?php
-            namespace App\Jobs;
+        $service = $this->writeClass('App\\Service\\MyService', '
+            class MyService { public function a(): void {} public function b(): void {} }');
+        $this->writeClass('App\\Service\\Other', '
+            class Other { public function go(): void {} }');
+        $job = $this->writeClass('App\\Jobs\\MyJob', '
             use App\Service\Other;
             class MyJob {
-                public function handle(Other $o): void {
-                    $o->go();
-                }
+                public function handle(Other $o): void { $o->go(); }
             }');
 
-        $reflector = $this->makeLoader();
-        $entryPoints       = [$this->ep('App\\Jobs\\MyJob', $job)];
-
-        $hits = TransitiveReach::affectedIndices(
-            $entryPoints,
-            [new ChangedSymbol($service, 'App\\Service\\MyService', 'b', 1, 1)],
-            $reflector,
-            $this->project,
-        );
-        self::assertSame([], array_keys($hits));
+        $this->assertDoesNotReach('App\\Jobs\\MyJob', $job, new ChangedSymbol($service, 'App\\Service\\MyService', 'b', 1, 1));
     }
 
     public function testTriggersReportTheChangedSymbol(): void
     {
-        $service = $this->project . '/app/Service/MyService.php';
-        $job     = $this->project . '/app/Jobs/MyJob.php';
-        file_put_contents($service, '<?php
-            namespace App\Service;
+        $service = $this->writeClass('App\\Service\\MyService', '
             class MyService { public function run(): void {} }');
-        file_put_contents($job, '<?php
-            namespace App\Jobs;
+        $job = $this->writeClass('App\\Jobs\\MyJob', '
             class MyJob {
                 public function handle(): void { (new \App\Service\MyService())->run(); }
             }');
 
-        $reflector = $this->makeLoader();
-        $entryPoints       = [$this->ep('App\\Jobs\\MyJob', $job)];
-
-        $changedSymbol   = new ChangedSymbol($service, 'App\\Service\\MyService', 'run', 1, 1);
-        $hits = TransitiveReach::affectedIndices($entryPoints, [$changedSymbol], $reflector, $this->project);
+        $hits = $this->hits('App\\Jobs\\MyJob', $job, new ChangedSymbol($service, 'App\\Service\\MyService', 'run', 1, 1));
         self::assertArrayHasKey(0, $hits);
         $syms = array_map(fn (ChangedSymbol $t) => $t->symbol(), $hits[0]['triggers']);
         self::assertContains('App\\Service\\MyService::run', $syms);
@@ -378,9 +207,58 @@ final class TransitiveReachTest extends TestCase
 
     public function testReturnsEmptyWhenNoChangedFiles(): void
     {
-        $reflector = $this->makeLoader();
-        $entryPoints       = [$this->ep('App\\Jobs\\MyJob', $this->project . '/app/Jobs/MyJob.php')];
-        self::assertSame([], TransitiveReach::affectedIndices($entryPoints, [], $reflector, $this->project));
+        $entryPoints = [$this->ep('App\\Jobs\\MyJob', $this->project . '/app/Jobs/MyJob.php')];
+        self::assertSame([], TransitiveReach::affectedIndices($entryPoints, [], $this->makeLoader(), $this->project));
+    }
+
+    // -----------------------------------------------------------------
+    // Test helpers — keep the assertions above readable.
+    // -----------------------------------------------------------------
+
+    /**
+     * Write `<?php namespace ...; <body>` to the canonical
+     * `app/<sub>/<ShortName>.php` path derived from the FQN.
+     * Indentation in the body is normalised so callers can keep their
+     * heredoc-style readable.
+     */
+    private function writeClass(string $fqn, string $body): string
+    {
+        $pos       = strrpos($fqn, '\\');
+        $namespace = $pos === false ? '' : substr($fqn, 0, $pos);
+        $shortName = $pos === false ? $fqn : substr($fqn, $pos + 1);
+        $relDir    = str_replace('\\', '/', preg_replace('/^App(\\\\|$)/', 'app$1', $namespace) ?? '');
+        $absDir    = rtrim($this->project . '/' . $relDir, '/');
+        if (!is_dir($absDir)) {
+            mkdir($absDir, 0700, true);
+        }
+        $path = $absDir . '/' . $shortName . '.php';
+        file_put_contents($path, "<?php\nnamespace {$namespace};\n" . trim($body) . "\n");
+        return $path;
+    }
+
+    private function assertReaches(string $entryFqn, string $entryPath, ChangedSymbol $change, int $maxDepth = 0): void
+    {
+        $hits = $this->hits($entryFqn, $entryPath, $change, $maxDepth);
+        self::assertSame([0], array_keys($hits), "expected {$entryFqn} to reach the change at maxDepth={$maxDepth}");
+    }
+
+    private function assertDoesNotReach(string $entryFqn, string $entryPath, ChangedSymbol $change, int $maxDepth = 0): void
+    {
+        $hits = $this->hits($entryFqn, $entryPath, $change, $maxDepth);
+        self::assertSame([], array_keys($hits), "expected {$entryFqn} NOT to reach the change at maxDepth={$maxDepth}");
+    }
+
+    /** @return array<int, array{path: list<string>, triggers: list<ChangedSymbol>}> */
+    private function hits(string $entryFqn, string $entryPath, ChangedSymbol $change, int $maxDepth = 0): array
+    {
+        return TransitiveReach::affectedIndices(
+            [$this->ep($entryFqn, $entryPath)],
+            [$change],
+            $this->makeLoader(),
+            $this->project,
+            5000,
+            $maxDepth,
+        );
     }
 
     private static function cs(string $path): ChangedSymbol
