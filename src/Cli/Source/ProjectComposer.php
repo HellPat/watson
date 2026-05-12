@@ -26,7 +26,7 @@ final class ProjectComposer
 {
     /** @var array<string, ?array<string,mixed>> */
     private static array $composerJsonCache = [];
-    /** @var array<string, array<string, true>> */
+    /** @var array<string, ?array<string, true>> */
     private static array $installedCache = [];
 
     /**
@@ -100,20 +100,58 @@ final class ProjectComposer
     }
 
     /**
-     * Read `vendor/composer/installed.json` (Composer 2 schema:
-     * `{"packages": [{"name": "...", ...}], "dev": false}`) and return
-     * the union of installed package names, including everything they
-     * `replace` / `provide`. Returns `null` when the file is missing —
-     * caller should fall back to the manifest.
+     * Resolve the consumer's installed-package set through Composer's
+     * own runtime registry. Preference order:
+     *
+     *   1. `vendor/composer/installed.php` — the canonical Composer 2
+     *      runtime artifact (same file
+     *      {@see \Composer\InstalledVersions} reads). Returns the
+     *      package map directly; the `replace` / `provide` aliases
+     *      Composer recorded are already in `versions[]`.
+     *   2. `vendor/composer/installed.json` — older Composer 2 / 1
+     *      checkouts that didn't generate the PHP variant.
+     *   3. `null` — caller falls back to the composer.json manifest
+     *      (uninstalled / partial checkout).
      *
      * @return array<string, true>|null
      */
     private static function installed(Project $project): ?array
     {
-        $path = $project->rootPath . '/vendor/composer/installed.json';
-        if (isset(self::$installedCache[$path])) {
-            return self::$installedCache[$path];
+        $key = $project->rootPath;
+        if (array_key_exists($key, self::$installedCache)) {
+            return self::$installedCache[$key];
         }
+
+        $set = self::readInstalledPhp($project->rootPath)
+            ?? self::readInstalledJson($project->rootPath);
+
+        return self::$installedCache[$key] = $set;
+    }
+
+    /** @return array<string, true>|null */
+    private static function readInstalledPhp(string $rootPath): ?array
+    {
+        $path = $rootPath . '/vendor/composer/installed.php';
+        if (!is_file($path)) {
+            return null;
+        }
+        $registry = @include $path;
+        if (!is_array($registry) || !isset($registry['versions']) || !is_array($registry['versions'])) {
+            return null;
+        }
+        $set = [];
+        foreach (array_keys($registry['versions']) as $name) {
+            if (is_string($name) && $name !== '') {
+                $set[$name] = true;
+            }
+        }
+        return $set;
+    }
+
+    /** @return array<string, true>|null */
+    private static function readInstalledJson(string $rootPath): ?array
+    {
+        $path = $rootPath . '/vendor/composer/installed.json';
         if (!is_file($path)) {
             return null;
         }
@@ -121,7 +159,7 @@ final class ProjectComposer
         if (!is_array($decoded)) {
             return null;
         }
-        $packages = $decoded['packages'] ?? $decoded; // composer 2 vs 1 fallback
+        $packages = $decoded['packages'] ?? $decoded; // Composer 2 vs 1
         if (!is_array($packages)) {
             return null;
         }
@@ -145,6 +183,6 @@ final class ProjectComposer
                 }
             }
         }
-        return self::$installedCache[$path] = $set;
+        return $set;
     }
 }
