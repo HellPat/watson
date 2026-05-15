@@ -7,7 +7,7 @@
         "php": "^8.4",
         "hellpat/watson": "@dev",
         "laravel/framework": "^13.0",
-        "phpunit/phpunit": "^11.0"
+        "phpunit/phpunit": "^13.0"
     },
     "repositories": [
         { "type": "path", "url": "../..", "options": { "symlink": true } }
