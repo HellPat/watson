@@ -24,7 +24,7 @@
         "twig/twig": "^3.10"
     },
     "require-dev": {
-        "behat/behat": "^3.14",
+        "behat/behat": "^4.0",
         "phpunit/phpunit": "^11.0"
     },
     "autoload": {
